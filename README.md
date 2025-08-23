@@ -1,92 +1,79 @@
-# Turborepo starter
+# n8ngpt
 
-This Turborepo starter is maintained by the Turborepo core team.
+A Turborepo monorepo containing an AI-powered backend and Chrome extension for enhanced n8n workflow automation.
 
-## Using this example
+## Prerequisites
 
-Run the following command:
+- Node.js 18+
+- pnpm (required package manager)
+- Chrome/Chromium browser (for extension development)
 
-```sh
-npx create-turbo@latest
+## Getting Started
+
+1. **Install dependencies:**
+```bash
+pnpm install
+```
+
+2. **Set up environment variables:**
+```bash
+# Create .env in apps/n8n-backend/ with:
+OPENROUTER_API_KEY=your_openrouter_api_key
+```
+
+3. **Start development:**
+```bash
+pnpm dev
 ```
 
 ## What's inside?
 
-This Turborepo includes the following packages/apps:
+This Turborepo includes the following applications:
 
-### Apps and Packages
+### Apps
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+- **`n8n-backend`**: Hono.js AI backend server with OpenRouter integration
+- **`n8n-extension`**: Chrome extension with AI chat interface for n8n workflows
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+Each application is built with [TypeScript](https://www.typescriptlang.org/).
 
-### Utilities
+### Tools
 
-This Turborepo has some additional tools already setup for you:
+This monorepo uses these development tools:
 
 - [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
+- [ESLint](https://eslint.org/) for code linting  
 - [Prettier](https://prettier.io) for code formatting
+- [Turborepo](https://turbo.build/repo) for monorepo orchestration
 
-### Build
+## Development Commands
 
-To build all apps and packages, run the following command:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+### All Applications
+```bash
+pnpm dev          # Start all applications in development mode
+pnpm build        # Build all applications for production
+pnpm lint         # Run linting across all packages
+pnpm format       # Format code using Prettier
+pnpm check-types  # Type check all TypeScript code
 ```
 
-You can build a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
-
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build --filter=docs
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
+### Backend Development
+```bash
+pnpm dev --filter=n8ngpt-backend    # Start backend server (localhost:5000)
+pnpm build --filter=n8ngpt-backend  # Build backend for production
 ```
 
-### Develop
-
-To develop all apps and packages, run the following command:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
+### Extension Development
+```bash
+pnpm dev --filter=n8n-extension     # Start Chrome extension development
+pnpm build --filter=n8n-extension   # Build extension for production
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
+## License
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev --filter=web
+This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+**Open Source**: You may use, modify, and distribute this software for any purpose, including commercial use.
 
 ### Remote Caching
 
