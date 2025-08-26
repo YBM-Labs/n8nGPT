@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { browser } from "wxt/browser";
 import { useChat } from "@ai-sdk/react";
 import {
@@ -64,6 +64,32 @@ const isTextPart = (part: unknown): part is TextPart =>
 const isReasoningPart = (part: unknown): part is ReasoningPart =>
   isRecord(part) && part.type === "reasoning" && typeof part.text === "string";
 
+// Extract JSON block from assistant text (```json ... ``` or first {...} block)
+const extractJsonFromText = (text: string): string | null => {
+  const fencedJson = text.match(/```json\s*([\s\S]*?)```/i);
+  if (fencedJson && fencedJson[1]?.trim()) {
+    return fencedJson[1].trim();
+  }
+  const fenced = text.match(/```\s*([\s\S]*?)```/);
+  if (fenced && fenced[1]?.trim()) {
+    const candidate = fenced[1].trim();
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {}
+  }
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last > first) {
+    const candidate = text.slice(first, last + 1);
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {}
+  }
+  return null;
+};
+
 /**
  * App
  * Renders a themed AI chat interface for the sidepanel using shared components from `@/components`.
@@ -92,8 +118,9 @@ export default function App() {
   const [isPasting, setIsPasting] = useState<boolean>(false);
   const [pendingPaste, setPendingPaste] = useState<{
     json: string;
-    toolCallId: string;
+    toolCallId?: string;
   } | null>(null);
+  const lastAutoPromptedMessageId = useRef<string | null>(null);
 
   // AI chat hook (expects a backend handler; UI will still render without one)
   const { messages, sendMessage, status, addToolResult } = useChat({
@@ -132,26 +159,55 @@ export default function App() {
     },
   });
 
+  // When assistant finishes a response, try to extract JSON from it and prompt immediately
+  useEffect(() => {
+    if (status === "streaming" || pendingPaste !== null) return;
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1] as unknown as {
+      role?: string;
+      id: string;
+      parts?: unknown[];
+    };
+    if (last?.role !== "assistant") return;
+    if (lastAutoPromptedMessageId.current === last.id) return;
+
+    const parts = Array.isArray(last.parts) ? (last.parts as unknown[]) : [];
+    const text = parts
+      .filter(isTextPart)
+      .map((p: unknown) => (p as TextPart).text)
+      .join("\n");
+    if (!text) return;
+    const json = extractJsonFromText(text);
+    if (json) {
+      setPendingPaste({ json });
+      lastAutoPromptedMessageId.current = last.id;
+    }
+  }, [messages, status, pendingPaste]);
+
   const handleConfirmPaste = async (): Promise<void> => {
     if (!pendingPaste) return;
     setIsPasting(true);
     try {
       const success = await pasteContent({ content: pendingPaste.json });
-      addToolResult({
-        tool: "paste_json_in_n8n",
-        toolCallId: pendingPaste.toolCallId,
-        output: success
-          ? `Workflow successfully pasted into n8n canvas`
-          : `Failed to paste workflow - please make sure you're on an n8n page`,
-      });
+      if (pendingPaste.toolCallId) {
+        addToolResult({
+          tool: "paste_json_in_n8n",
+          toolCallId: pendingPaste.toolCallId,
+          output: success
+            ? `Workflow successfully pasted into n8n canvas`
+            : `Failed to paste workflow - please make sure you're on an n8n page`,
+        });
+      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error occurred";
-      addToolResult({
-        tool: "paste_json_in_n8n",
-        toolCallId: pendingPaste.toolCallId,
-        output: `Error pasting workflow: ${errorMessage}`,
-      });
+      if (pendingPaste.toolCallId) {
+        addToolResult({
+          tool: "paste_json_in_n8n",
+          toolCallId: pendingPaste.toolCallId,
+          output: `Error pasting workflow: ${errorMessage}`,
+        });
+      }
     } finally {
       setIsPasting(false);
       setPendingPaste(null);
@@ -160,11 +216,13 @@ export default function App() {
 
   const handleCancelPaste = (): void => {
     if (!pendingPaste) return;
-    addToolResult({
-      tool: "paste_json_in_n8n",
-      toolCallId: pendingPaste.toolCallId,
-      output: `Paste cancelled by user`,
-    });
+    if (pendingPaste.toolCallId) {
+      addToolResult({
+        tool: "paste_json_in_n8n",
+        toolCallId: pendingPaste.toolCallId,
+        output: `Paste cancelled by user`,
+      });
+    }
     setPendingPaste(null);
   };
 
