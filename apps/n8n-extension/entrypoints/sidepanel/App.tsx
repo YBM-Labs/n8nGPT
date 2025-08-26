@@ -120,7 +120,38 @@ export default function App() {
     json: string;
     toolCallId?: string;
   } | null>(null);
+  const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
+
+  // Keep isOnN8n in sync with active tab
+  useEffect(() => {
+    const update = async () => {
+      try {
+        const [tab] = await browser.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        const url = typeof tab?.url === "string" ? tab.url : "";
+        setIsOnN8n(isN8nInstance(url));
+      } catch {}
+    };
+    update();
+    const onUpdated = (_tabId: number, changeInfo: any) => {
+      if (changeInfo?.url) update();
+    };
+    const onActivated = () => update();
+    browser.tabs.onUpdated.addListener(onUpdated);
+    browser.tabs.onActivated.addListener(onActivated as any);
+    return () => {
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      browser.tabs.onActivated.removeListener(onActivated as any);
+    };
+  }, []);
+
+  // Clear any pending paste when leaving n8n
+  useEffect(() => {
+    if (!isOnN8n && pendingPaste) setPendingPaste(null);
+  }, [isOnN8n, pendingPaste]);
 
   // AI chat hook (expects a backend handler; UI will still render without one)
   const { messages, sendMessage, status, addToolResult } = useChat({
@@ -130,6 +161,14 @@ export default function App() {
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     onToolCall: async ({ toolCall }) => {
       if (toolCall.toolName === "paste_json_in_n8n") {
+        if (!isOnN8n) {
+          addToolResult({
+            tool: "paste_json_in_n8n",
+            toolCallId: toolCall.toolCallId,
+            output: `Not on an n8n tab. Open an n8n workflow page to paste.`,
+          });
+          return;
+        }
         try {
           let content: string;
           if (
@@ -143,8 +182,6 @@ export default function App() {
           } else {
             throw new Error("Invalid tool call input format");
           }
-
-          // Ask user to confirm via UI buttons
           setPendingPaste({ json: content, toolCallId: toolCall.toolCallId });
         } catch (error) {
           const errorMessage =
@@ -161,6 +198,7 @@ export default function App() {
 
   // When assistant finishes a response, try to extract JSON from it and prompt immediately
   useEffect(() => {
+    if (!isOnN8n) return;
     if (status === "streaming" || pendingPaste !== null) return;
     if (messages.length === 0) return;
     const last = messages[messages.length - 1] as unknown as {
@@ -170,7 +208,6 @@ export default function App() {
     };
     if (last?.role !== "assistant") return;
     if (lastAutoPromptedMessageId.current === last.id) return;
-
     const parts = Array.isArray(last.parts) ? (last.parts as unknown[]) : [];
     const text = parts
       .filter(isTextPart)
@@ -182,10 +219,10 @@ export default function App() {
       setPendingPaste({ json });
       lastAutoPromptedMessageId.current = last.id;
     }
-  }, [messages, status, pendingPaste]);
+  }, [messages, status, pendingPaste, isOnN8n]);
 
   const handleConfirmPaste = async (): Promise<void> => {
-    if (!pendingPaste) return;
+    if (!pendingPaste || !isOnN8n) return;
     setIsPasting(true);
     try {
       const success = await pasteContent({ content: pendingPaste.json });
@@ -231,11 +268,11 @@ export default function App() {
    */
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
+    if (!isOnN8n) return;
     const trimmed = input.trim();
     if (trimmed.length === 0) {
       return;
     }
-
     sendMessage(
       { text: trimmed },
       {
@@ -497,6 +534,12 @@ export default function App() {
                   </div>
                 );
               })}
+              {!isOnN8n && (
+                <div className="mx-4 mb-2 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
+                  This extension works only on n8n pages. Open an n8n workflow
+                  tab to use it.
+                </div>
+              )}
               {(status === "submitted" || isPasting) && (
                 <div className="flex justify-center py-2 text-muted-foreground">
                   <Loader />
