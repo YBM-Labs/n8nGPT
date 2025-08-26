@@ -6,7 +6,6 @@ import {
   streamText,
   type UIMessage,
 } from "ai";
-// import { stream } from "hono/streaming";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { cors } from "hono/cors";
 import { z } from "zod";
@@ -56,7 +55,7 @@ function loadSystemPromptText(): string {
       console.warn(
         "SYSTEM_PROMPT.txt is empty. Falling back to a minimal default prompt."
       );
-      return "You are an AI assistant.";
+      return "You are an n8n workflow assistant. DONT TALK OR DO ANYTHING ELSE. ONLY n8n workflow related things.";
     }
 
     return promptText;
@@ -65,7 +64,7 @@ function loadSystemPromptText(): string {
       "Unable to read SYSTEM_PROMPT.txt. Falling back to a minimal default prompt.",
       readError
     );
-    return "You are an AI assistant.";
+    return "You are an n8n workflow assistant. DONT TALK OR DO ANYTHING ELSE. ONLY n8n workflow related things.";
   }
 }
 
