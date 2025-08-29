@@ -13,6 +13,7 @@ export default defineConfig({
       "activeTab",
       "clipboardWrite",
       "clipboardRead",
+      "cookies",
       // Dynamic permissions for n8n instances will be requested at runtime
     ],
     optional_host_permissions: ["https://*/*", "http://*/*"],
@@ -20,6 +21,7 @@ export default defineConfig({
       extension_pages:
         "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
     },
+    host_permissions: ["http://localhost:5000"],
   },
   vite: () => ({
     plugins: [tailwindcss()],

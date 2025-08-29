@@ -46,6 +46,83 @@ import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai";
+import { authClient } from "@/lib/auth-client";
+
+function AuthPanel() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState<string>("");
+  const { data: session, isPending } = authClient.useSession();
+
+  const signUp = async () => {
+    setMessage("");
+    const { error } = await authClient.signUp.email({
+      email,
+      password,
+      name: email.split("@")[0] || "user",
+    });
+    setMessage(
+      error ? `Sign up failed: ${error.message}` : "Sign up successful"
+    );
+  };
+
+  const signIn = async () => {
+    setMessage("");
+    const { error } = await authClient.signIn.email({ email, password });
+    setMessage(error ? `Sign in failed: ${error.message}` : "Signed in");
+  };
+
+  return (
+    <div className="border-b px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Auth</span>
+        <span className="text-xs text-muted-foreground">
+          {isPending
+            ? "Loading..."
+            : session
+              ? `Signed in as ${session.user.email ?? "user"}`
+              : "Signed out"}
+        </span>
+      </div>
+      {!session && (
+        <div className="flex flex-col gap-2">
+          <input
+            className="rounded-md border px-2 py-1 text-sm bg-background"
+            type="email"
+            placeholder="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <input
+            className="rounded-md border px-2 py-1 text-sm bg-background"
+            type="password"
+            placeholder="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button
+              className="text-xs rounded-md border px-2 py-1"
+              onClick={signUp}
+            >
+              Sign up
+            </button>
+            <button
+              className="text-xs rounded-md border px-2 py-1"
+              onClick={signIn}
+            >
+              Sign in
+            </button>
+          </div>
+        </div>
+      )}
+
+      {message && (
+        <div className="text-xs text-muted-foreground">{message}</div>
+      )}
+    </div>
+  );
+}
 
 // ----- Message part type guards to avoid unsafe casts -----
 type SourceUrlPart = { type: "source-url"; url: string };
@@ -97,9 +174,8 @@ const extractJsonFromText = (text: string): string | null => {
  * - Preserves the existing n8n "Paste Workflow" utility as a toolbar action.
  */
 export default function App() {
-  /**
-   * Available model options for the chat UI.
-   */
+  const { data: session, isPending } = authClient.useSession();
+
   const MODELS: ReadonlyArray<{ name: string; value: string }> = [
     {
       name: "Claude Sonnet 4",
@@ -116,6 +192,7 @@ export default function App() {
   );
   const [webSearch, setWebSearch] = useState<boolean>(false);
   const [isPasting, setIsPasting] = useState<boolean>(false);
+  const [generations, setGenerations] = useState<number>(0);
   const [pendingPaste, setPendingPaste] = useState<{
     json: string;
     toolCallId?: string;
@@ -123,6 +200,12 @@ export default function App() {
   const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
 
+  const signOut = async () => {
+    const { error } = await authClient.signOut();
+    if (error) {
+      console.error(error);
+    }
+  };
   // Keep isOnN8n in sync with active tab
   useEffect(() => {
     const update = async () => {
@@ -220,6 +303,17 @@ export default function App() {
       lastAutoPromptedMessageId.current = last.id;
     }
   }, [messages, status, pendingPaste, isOnN8n]);
+
+  useEffect(() => {
+    const getGenerations = async () => {
+      const response = await fetch(
+        `${import.meta.env.VITE_BACKEND_API}/generations`
+      );
+      const data = await response.json();
+      setGenerations(data.generations);
+    };
+    getGenerations();
+  }, [session, messages]);
 
   const handleConfirmPaste = async (): Promise<void> => {
     if (!pendingPaste || !isOnN8n) return;
@@ -465,153 +559,173 @@ export default function App() {
   return (
     <div className="size-full min-h-screen bg-background text-foreground">
       <div className="mx-auto size-full max-w-3xl">
-        <div className="flex h-[calc(100vh)] flex-col overflow-hidden rounded-xl bg-background shadow-sm">
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Assistant</span>
+        {!session ? (
+          <AuthPanel />
+        ) : (
+          <div className="flex h-[calc(100vh)] flex-col overflow-hidden rounded-xl bg-background shadow-sm">
+            <div className="flex items-center justify-between px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">n8n GPT</span>
+              </div>
+              <Badge variant="secondary" className="font-normal">
+                {generations}/100 Requests
+              </Badge>
             </div>
-            <Badge variant="secondary" className="font-normal">
-              {model}
-            </Badge>
-          </div>
-          <Conversation className="h-full">
-            <ConversationContent className="pb-24">
-              {messages.map((message) => {
-                const parts = Array.isArray(
-                  (message as { parts?: unknown[] }).parts
-                )
-                  ? (message as { parts: Array<unknown> }).parts
-                  : [];
-                const sourceUrls = parts
-                  .filter(isSourceUrlPart)
-                  .map((p) => p.url);
-                const sourceCount = sourceUrls.length;
-                return (
-                  <div key={message.id}>
-                    {message.role === "assistant" && sourceCount > 0 && (
-                      <Sources>
-                        <SourcesTrigger count={sourceCount} />
-                        <SourcesContent>
-                          {sourceUrls.map((url, i) => (
-                            <Source
-                              key={`${message.id}-src-${i}`}
-                              href={url}
-                              title={url}
-                            />
-                          ))}
-                        </SourcesContent>
-                      </Sources>
-                    )}
-                    <Message
-                      from={message.role}
-                      className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%]"
-                    >
-                      <MessageContent>
-                        {parts.map((part, i) => {
-                          if (isTextPart(part)) {
-                            return (
-                              <Response key={`${message.id}-${i}`}>
-                                {part.text}
-                              </Response>
-                            );
-                          }
-                          if (isReasoningPart(part)) {
-                            return (
-                              <Reasoning
-                                key={`${message.id}-${i}`}
-                                className="w-full"
-                                isStreaming={status === "streaming"}
-                              >
-                                <ReasoningTrigger />
-                                <ReasoningContent>{part.text}</ReasoningContent>
-                              </Reasoning>
-                            );
-                          }
-                          return null;
-                        })}
-                      </MessageContent>
-                    </Message>
+            <Conversation className="h-full">
+              <ConversationContent className="pb-24">
+                {messages.map((message) => {
+                  const parts = Array.isArray(
+                    (message as { parts?: unknown[] }).parts
+                  )
+                    ? (message as { parts: Array<unknown> }).parts
+                    : [];
+                  const sourceUrls = parts
+                    .filter(isSourceUrlPart)
+                    .map((p) => p.url);
+                  const sourceCount = sourceUrls.length;
+                  return (
+                    <div key={message.id}>
+                      {message.role === "assistant" && sourceCount > 0 && (
+                        <Sources>
+                          <SourcesTrigger count={sourceCount} />
+                          <SourcesContent>
+                            {sourceUrls.map((url, i) => (
+                              <Source
+                                key={`${message.id}-src-${i}`}
+                                href={url}
+                                title={url}
+                              />
+                            ))}
+                          </SourcesContent>
+                        </Sources>
+                      )}
+                      <Message
+                        from={message.role}
+                        className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%]"
+                      >
+                        <MessageContent>
+                          {parts.map((part, i) => {
+                            if (isTextPart(part)) {
+                              return (
+                                <Response key={`${message.id}-${i}`}>
+                                  {part.text}
+                                </Response>
+                              );
+                            }
+                            if (isReasoningPart(part)) {
+                              return (
+                                <Reasoning
+                                  key={`${message.id}-${i}`}
+                                  className="w-full"
+                                  isStreaming={status === "streaming"}
+                                >
+                                  <ReasoningTrigger />
+                                  <ReasoningContent>
+                                    {part.text}
+                                  </ReasoningContent>
+                                </Reasoning>
+                              );
+                            }
+                            return null;
+                          })}
+                        </MessageContent>
+                      </Message>
+                    </div>
+                  );
+                })}
+                {!isOnN8n && (
+                  <div className="mx-4 mb-2 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
+                    This extension works only on n8n pages. Open an n8n workflow
+                    tab to use it.
                   </div>
-                );
-              })}
-              {!isOnN8n && (
-                <div className="mx-4 mb-2 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
-                  This extension works only on n8n pages. Open an n8n workflow
-                  tab to use it.
-                </div>
-              )}
-              {(status === "submitted" || isPasting) && (
-                <div className="flex justify-center py-2 text-muted-foreground">
-                  <Loader />
-                  {isPasting && (
-                    <span className="ml-2 text-sm">
-                      Pasting workflow to n8n...
-                    </span>
-                  )}
-                </div>
-              )}
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
+                )}
+                {(status === "submitted" || isPasting) && (
+                  <div className="flex justify-center py-2 text-muted-foreground">
+                    <Loader />
+                    {isPasting && (
+                      <span className="ml-2 text-sm">
+                        Pasting workflow to n8n...
+                      </span>
+                    )}
+                  </div>
+                )}
+              </ConversationContent>
+              <ConversationScrollButton />
+            </Conversation>
 
-          {pendingPaste && (
-            <div className="sticky bottom-0 z-20 bg-card/95 border-t px-4 py-3 flex items-center gap-3">
-              <div className="text-sm flex-1">
-                Paste generated workflow JSON into n8n?
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={handleConfirmPaste}
-                >
-                  Yes, paste
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleCancelPaste}>
-                  No
-                </Button>
-              </div>
-            </div>
-          )}
-
-          <div className="sticky bottom-0 z-10 border-t bg-card/80 px-4 pb-4 pt-2 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-            <PromptInput
-              onSubmit={handleSubmit}
-              className="mt-2 border-border/50 bg-card shadow-none"
-            >
-              <PromptInputTextarea
-                onChange={(e) => setInput(e.target.value)}
-                value={input}
-              />
-              <PromptInputToolbar>
-                <PromptInputTools>
-                  <PromptInputModelSelect
-                    onValueChange={(value) => setModel(value)}
-                    value={model}
+            {pendingPaste && (
+              <div className="sticky bottom-0 z-20 bg-card/95 border-t px-4 py-3 flex items-center gap-3">
+                <div className="text-sm flex-1">
+                  Paste generated workflow JSON into n8n?
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={handleConfirmPaste}
                   >
-                    <PromptInputModelSelectTrigger>
-                      <PromptInputModelSelectValue />
-                    </PromptInputModelSelectTrigger>
-                    <PromptInputModelSelectContent>
-                      {MODELS.map((m) => (
-                        <PromptInputModelSelectItem
-                          key={m.value}
-                          value={m.value}
-                        >
-                          {m.name}
-                        </PromptInputModelSelectItem>
-                      ))}
-                    </PromptInputModelSelectContent>
-                  </PromptInputModelSelect>
-                </PromptInputTools>
-                <PromptInputSubmit
-                  disabled={input.trim().length === 0}
-                  status={status}
+                    Yes, paste
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCancelPaste}
+                  >
+                    No
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="sticky bottom-0 z-10 border-t bg-card/80 px-4 pb-4 pt-2 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+              <PromptInput
+                onSubmit={handleSubmit}
+                className="mt-2 border-border/50 bg-card shadow-none"
+              >
+                <PromptInputTextarea
+                  onChange={(e) => setInput(e.target.value)}
+                  value={input}
                 />
-              </PromptInputToolbar>
-            </PromptInput>
+                <PromptInputToolbar>
+                  <PromptInputTools>
+                    <PromptInputModelSelect
+                      onValueChange={(value) => setModel(value)}
+                      value={model}
+                    >
+                      <PromptInputModelSelectTrigger>
+                        <PromptInputModelSelectValue />
+                      </PromptInputModelSelectTrigger>
+                      <PromptInputModelSelectContent>
+                        {MODELS.map((m) => (
+                          <PromptInputModelSelectItem
+                            key={m.value}
+                            value={m.value}
+                          >
+                            {m.name}
+                          </PromptInputModelSelectItem>
+                        ))}
+                      </PromptInputModelSelectContent>
+                    </PromptInputModelSelect>
+                  </PromptInputTools>
+                  <PromptInputSubmit
+                    disabled={input.trim().length === 0}
+                    status={status}
+                  />
+                </PromptInputToolbar>
+              </PromptInput>
+              {session && (
+                <div className="text-sm text-muted-foreground flex justify-center items-center m-2">
+                  <button
+                    className="text-xs rounded-md border px-2 py-1 cursor-pointer"
+                    onClick={signOut}
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

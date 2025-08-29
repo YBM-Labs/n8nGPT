@@ -14,13 +14,31 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { env } from "hono/adapter";
 import dotenv from "dotenv";
-
+import { auth } from "./lib/auth.js";
+import { getGenerations, incrementGenerations } from "./lib/generations.js";
 dotenv.config();
 
 const app = new Hono();
 
-// Add CORS middleware
-app.use("/*", cors());
+// better-auth routes
+app.all("/api/auth/**", async (c) => {
+  return auth.handler(c.req.raw);
+});
+
+const EXTENSION_IDS = ["chrome-extension://ldlfbgdnhkkhhkcilkeoaepgnpnbbeoc"];
+const ALLOWED_ORIGINS = ["http://localhost:5000", ...EXTENSION_IDS];
+app.use(
+  "/*",
+  cors({
+    origin: (origin) =>
+      origin && ALLOWED_ORIGINS.includes(origin) ? origin : "",
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    exposeHeaders: ["Set-Cookie"],
+    maxAge: 86400,
+  })
+);
 
 /**
  * Resolve the absolute file system path to the repository root.
@@ -72,6 +90,17 @@ function loadSystemPromptText(): string {
 const SYSTEM_PROMPT: string = loadSystemPromptText();
 
 app.post("/", async (c) => {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const { generations, reset } = await getGenerations(session.user.id);
+
+  if (generations >= 100) {
+    return c.json({ error: "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue." }, 403);
+  }
+
   const { OPENROUTER_API_KEY } = env<{ OPENROUTER_API_KEY: string }>(c);
   const openrouter = createOpenRouter({
     apiKey: OPENROUTER_API_KEY,
@@ -93,6 +122,7 @@ app.post("/", async (c) => {
       );
     }
 
+
     const result = streamText({
       model: openrouter(model || "openai/gpt-5"),
       messages: convertToModelMessages(messages),
@@ -108,11 +138,12 @@ app.post("/", async (c) => {
           }) as any,
         },
       },
-      // Use the repository's SYSTEM_PROMPT.txt content as the system prompt
       system: SYSTEM_PROMPT,
     });
 
     c.header("Content-Type", "text/plain; charset=utf-8");
+
+    await incrementGenerations(session.user.id);
 
     return result.toUIMessageStreamResponse();
   } catch (error) {
@@ -120,6 +151,15 @@ app.post("/", async (c) => {
     return c.json({ error: "Internal server error" }, 500);
   }
 });
+
+app.get("/generations", async (c) => {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const { generations } = await getGenerations(session.user.id);
+  return c.json({ generations });
+})
 
 serve(
   {
