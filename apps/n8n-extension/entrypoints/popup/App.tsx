@@ -113,7 +113,9 @@ export default function App() {
       >
         <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
           <span>Powered by</span>
-          <span className="font-medium text-primary">AI</span>
+          <a href="https://ybmlabs.com/" className="font-medium text-primary">
+            YBM Labs
+          </a>
         </div>
       </div>
     </div>
