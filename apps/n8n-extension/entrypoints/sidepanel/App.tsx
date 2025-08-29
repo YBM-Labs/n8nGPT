@@ -102,6 +102,7 @@ export default function App() {
     },
     { name: "Gemini 2.0 Flash", value: "google/gemini-2.0-flash-001" },
     { name: "Deepseek R1", value: "deepseek/deepseek-r1" },
+    { name: "Grok Code Fast 1", value: "x-ai/grok-code-fast-1" },
   ];
 
   // Local chat UI state
