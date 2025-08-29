@@ -9,13 +9,12 @@ import {
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+
 import { env } from "hono/adapter";
 import dotenv from "dotenv";
 import { auth } from "./lib/auth.js";
 import { getGenerations, incrementGenerations } from "./lib/generations.js";
+import { loadSystemPromptText } from "./utils/helperFunctions.js";
 dotenv.config();
 
 const app = new Hono();
@@ -40,52 +39,6 @@ app.use(
   })
 );
 
-/**
- * Resolve the absolute file system path to the repository root.
- * This is computed relative to the current module file path.
- */
-function resolveProjectRootDirectory(): string {
-  // Convert the module URL (e.g., file:///...) into a regular file system path
-  const currentModuleFilePath: string = fileURLToPath(import.meta.url);
-  const currentModuleDirectory: string = dirname(currentModuleFilePath);
-  // Project root is one level up from `src/`
-  return resolve(currentModuleDirectory, "..");
-}
-
-/**
- * Load the system prompt content from `SYSTEM_PROMPT.txt` at the project root.
- * Provides a safe default if the file is missing, unreadable, or empty.
- */
-function loadSystemPromptText(): string {
-  try {
-    const projectRootDirectory: string = resolveProjectRootDirectory();
-    const systemPromptPath: string = resolve(
-      projectRootDirectory,
-      "SYSTEM_PROMPT.txt"
-    );
-
-    // Read as UTF-8 text and trim extraneous whitespace for cleaner prompts
-    const promptText: string = readFileSync(systemPromptPath, {
-      encoding: "utf-8",
-    }).trim();
-
-    if (promptText.length === 0) {
-      console.warn(
-        "SYSTEM_PROMPT.txt is empty. Falling back to a minimal default prompt."
-      );
-      return "You are an n8n workflow assistant. DONT TALK OR DO ANYTHING ELSE. ONLY n8n workflow related things.";
-    }
-
-    return promptText;
-  } catch (readError) {
-    console.error(
-      "Unable to read SYSTEM_PROMPT.txt. Falling back to a minimal default prompt.",
-      readError
-    );
-    return "You are an n8n workflow assistant. DONT TALK OR DO ANYTHING ELSE. ONLY n8n workflow related things.";
-  }
-}
-
 // Load once at startup to avoid reading from disk on every request
 const SYSTEM_PROMPT: string = loadSystemPromptText();
 
@@ -98,7 +51,13 @@ app.post("/", async (c) => {
   const { generations, reset } = await getGenerations(session.user.id);
 
   if (generations >= 100) {
-    return c.json({ error: "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue." }, 403);
+    return c.json(
+      {
+        message:
+          "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue.",
+      },
+      403
+    );
   }
 
   const { OPENROUTER_API_KEY } = env<{ OPENROUTER_API_KEY: string }>(c);
@@ -107,21 +66,15 @@ app.post("/", async (c) => {
   });
 
   try {
-    const {
-      messages,
-      model,
-      webSearch,
-    }: { messages: UIMessage[]; model?: string; webSearch?: boolean } =
+    const { messages, model }: { messages: UIMessage[]; model?: string } =
       await c.req.json();
 
-    // Validate required fields
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return c.json(
         { error: "Messages array is required and cannot be empty" },
         400
       );
     }
-
 
     const result = streamText({
       model: openrouter(model || "openai/gpt-5"),
@@ -159,7 +112,7 @@ app.get("/generations", async (c) => {
   }
   const { generations } = await getGenerations(session.user.id);
   return c.json({ generations });
-})
+});
 
 serve(
   {

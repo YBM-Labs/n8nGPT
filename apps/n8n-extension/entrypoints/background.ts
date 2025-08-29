@@ -71,6 +71,5 @@ export default defineBackground({
       }
     );
 
-    console.log("N8N GPT Background Script initialized (debugger-free mode)");
   },
 });

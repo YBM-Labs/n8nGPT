@@ -47,82 +47,7 @@ import {
   lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai";
 import { authClient } from "@/lib/auth-client";
-
-function AuthPanel() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState<string>("");
-  const { data: session, isPending } = authClient.useSession();
-
-  const signUp = async () => {
-    setMessage("");
-    const { error } = await authClient.signUp.email({
-      email,
-      password,
-      name: email.split("@")[0] || "user",
-    });
-    setMessage(
-      error ? `Sign up failed: ${error.message}` : "Sign up successful"
-    );
-  };
-
-  const signIn = async () => {
-    setMessage("");
-    const { error } = await authClient.signIn.email({ email, password });
-    setMessage(error ? `Sign in failed: ${error.message}` : "Signed in");
-  };
-
-  return (
-    <div className="border-b px-4 py-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">Auth</span>
-        <span className="text-xs text-muted-foreground">
-          {isPending
-            ? "Loading..."
-            : session
-              ? `Signed in as ${session.user.email ?? "user"}`
-              : "Signed out"}
-        </span>
-      </div>
-      {!session && (
-        <div className="flex flex-col gap-2">
-          <input
-            className="rounded-md border px-2 py-1 text-sm bg-background"
-            type="email"
-            placeholder="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            className="rounded-md border px-2 py-1 text-sm bg-background"
-            type="password"
-            placeholder="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <div className="flex gap-2">
-            <button
-              className="text-xs rounded-md border px-2 py-1"
-              onClick={signUp}
-            >
-              Sign up
-            </button>
-            <button
-              className="text-xs rounded-md border px-2 py-1"
-              onClick={signIn}
-            >
-              Sign in
-            </button>
-          </div>
-        </div>
-      )}
-
-      {message && (
-        <div className="text-xs text-muted-foreground">{message}</div>
-      )}
-    </div>
-  );
-}
+import AuthPanel from "@/components/auth/authComponent";
 
 // ----- Message part type guards to avoid unsafe casts -----
 type SourceUrlPart = { type: "source-url"; url: string };
@@ -167,12 +92,6 @@ const extractJsonFromText = (text: string): string | null => {
   return null;
 };
 
-/**
- * App
- * Renders a themed AI chat interface for the sidepanel using shared components from `@/components`.
- * - Uses Tailwind theme tokens (e.g. bg-background, text-foreground) with no static colors.
- * - Preserves the existing n8n "Paste Workflow" utility as a toolbar action.
- */
 export default function App() {
   const { data: session, isPending } = authClient.useSession();
 
@@ -198,6 +117,7 @@ export default function App() {
     toolCallId?: string;
   } | null>(null);
   const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
 
   const signOut = async () => {
@@ -237,11 +157,38 @@ export default function App() {
   }, [isOnN8n, pendingPaste]);
 
   // AI chat hook (expects a backend handler; UI will still render without one)
-  const { messages, sendMessage, status, addToolResult } = useChat({
+  const { messages, sendMessage, status, addToolResult, error } = useChat({
     transport: new DefaultChatTransport({
       api: import.meta.env.VITE_BACKEND_API ?? "http://localhost:5000",
     }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    onError: (error) => {
+      console.error("Chat error:", error.message);
+      // Check if it's a 403 error (generation limit reached)
+      if (error.message) {
+        try {
+          // Try to parse the error message for generation limit
+          const errorText = error.message;
+          if (errorText.includes("maximum number of generations")) {
+            setGenerationError(
+              "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue."
+            );
+          } else {
+            setGenerationError(
+              "You have reached your monthly limit. Please try again next month."
+            );
+          }
+        } catch {
+          setGenerationError(
+            "You have reached your monthly limit. Please try again next month."
+          );
+        }
+      } else {
+        setGenerationError(
+          "An error occurred while processing your request. Please try again."
+        );
+      }
+    },
     onToolCall: async ({ toolCall }) => {
       if (toolCall.toolName === "paste_json_in_n8n") {
         if (!isOnN8n) {
@@ -367,6 +314,10 @@ export default function App() {
     if (trimmed.length === 0) {
       return;
     }
+
+    // Clear any previous generation errors
+    setGenerationError(null);
+
     sendMessage(
       { text: trimmed },
       {
@@ -557,17 +508,27 @@ export default function App() {
   };
 
   return (
-    <div className="size-full min-h-screen bg-background text-foreground">
+    <div className="size-full min-h-screen bg-gradient-to-br from-background via-background to-background/95 text-foreground">
       <div className="mx-auto size-full max-w-3xl">
         {!session ? (
           <AuthPanel />
         ) : (
-          <div className="flex h-[calc(100vh)] flex-col overflow-hidden rounded-xl bg-background shadow-sm">
-            <div className="flex items-center justify-between px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">n8n GPT</span>
+          <div className="flex h-[calc(100vh)] flex-col overflow-hidden bg-background/50 backdrop-blur-sm border border-border/50 shadow-lg">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 bg-card/30 backdrop-blur-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-6 h-6 bg-gradient-to-br from-primary to-primary/80 rounded-md flex items-center justify-center">
+                  <span className="text-xs font-bold text-primary-foreground">
+                    n8n
+                  </span>
+                </div>
+                <span className="text-sm font-semibold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
+                  n8n GPT Assistant
+                </span>
               </div>
-              <Badge variant="secondary" className="font-normal">
+              <Badge
+                variant="secondary"
+                className="font-normal bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 transition-colors duration-200"
+              >
                 {generations}/100 Requests
               </Badge>
             </div>
@@ -634,19 +595,50 @@ export default function App() {
                   );
                 })}
                 {!isOnN8n && (
-                  <div className="mx-4 mb-2 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
-                    This extension works only on n8n pages. Open an n8n workflow
-                    tab to use it.
+                  <div className="mx-4 mb-2 rounded-xl bg-gradient-to-r from-muted/40 to-muted/20 border border-border/30 p-4 text-sm text-muted-foreground animate-in fade-in slide-in-from-top-2 duration-500">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-2 h-2 bg-yellow-500/60 rounded-full animate-pulse"></div>
+                      <span className="font-medium">n8n Required</span>
+                    </div>
+                    <p className="text-xs leading-relaxed">
+                      This extension works only on n8n pages. Navigate to an n8n
+                      workflow tab to start creating automations.
+                    </p>
                   </div>
                 )}
-                {(status === "submitted" || isPasting) && (
-                  <div className="flex justify-center py-2 text-muted-foreground">
-                    <Loader />
-                    {isPasting && (
-                      <span className="ml-2 text-sm">
-                        Pasting workflow to n8n...
+
+                {/* Generation Error Display */}
+                {generationError && (
+                  <div className="mx-4 mb-2 rounded-xl bg-gradient-to-r from-destructive/20 to-destructive/10 border border-destructive/30 p-4 text-sm animate-in fade-in slide-in-from-top-2 duration-500">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 bg-destructive rounded-full"></div>
+                      <span className="font-medium text-destructive">
+                        Generation Limit Reached
                       </span>
-                    )}
+                    </div>
+                    <p className="text-xs leading-relaxed text-destructive/90 mb-3">
+                      {generationError}
+                    </p>
+                    <button
+                      onClick={() => setGenerationError(null)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/30 transition-colors duration-200"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+                {(status === "submitted" || isPasting) && !generationError && (
+                  <div className="flex justify-center py-4 text-muted-foreground animate-in fade-in duration-300">
+                    <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
+                      <Loader />
+                      {isPasting ? (
+                        <span className="text-sm font-medium">
+                          ✨ Pasting workflow to n8n...
+                        </span>
+                      ) : (
+                        <span className="text-sm font-medium">Thinking...</span>
+                      )}
+                    </div>
                   </div>
                 )}
               </ConversationContent>
@@ -654,33 +646,39 @@ export default function App() {
             </Conversation>
 
             {pendingPaste && (
-              <div className="sticky bottom-0 z-20 bg-card/95 border-t px-4 py-3 flex items-center gap-3">
-                <div className="text-sm flex-1">
-                  Paste generated workflow JSON into n8n?
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="default"
-                    onClick={handleConfirmPaste}
-                  >
-                    Yes, paste
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleCancelPaste}
-                  >
-                    No
-                  </Button>
+              <div className="sticky bottom-0 z-20 bg-card/95 backdrop-blur-sm border-t border-border/30 px-4 py-3 animate-in slide-in-from-bottom-4 duration-300">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className="text-sm font-medium">
+                      Paste workflow into n8n?
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={handleConfirmPaste}
+                      className=" transition-transform duration-200 bg-primary hover:bg-primary/90"
+                    >
+                      Yes
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCancelPaste}
+                      className=" transition-transform duration-200 border-border/50 hover:border-border"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
 
-            <div className="sticky bottom-0 z-10 border-t bg-card/80 px-4 pb-4 pt-2 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+            <div className="sticky bottom-0 z-10 border-t border-border/30 bg-card/80 px-4 pb-4 pt-2 backdrop-blur-sm supports-[backdrop-filter]:bg-card/60">
               <PromptInput
                 onSubmit={handleSubmit}
-                className="mt-2 border-border/50 bg-card shadow-none"
+                className="mt-2 border-border/50 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow duration-200 rounded-xl"
               >
                 <PromptInputTextarea
                   onChange={(e) => setInput(e.target.value)}
@@ -716,10 +714,13 @@ export default function App() {
               {session && (
                 <div className="text-sm text-muted-foreground flex justify-center items-center m-2">
                   <button
-                    className="text-xs rounded-md border px-2 py-1 cursor-pointer"
+                    className="text-xs rounded-lg border border-border/50 px-3 py-1.5 cursor-pointer
+                      hover:border-primary/50 hover:bg-primary/5 hover:text-primary
+                      transition-all duration-200 ease-in-out
+                      hover:scale-105 active:scale-95"
                     onClick={signOut}
                   >
-                    Sign out
+                    👋 Sign out
                   </button>
                 </div>
               )}
