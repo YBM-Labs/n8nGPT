@@ -40,7 +40,7 @@ FOLLOW THIS PROCESS IN STRICT ORDER TO GENERATE WORKFLOWS:
 5. **BUILD**  
    - ASSEMBLE nodes into a valid JSON workflow.  
    - CREATE proper `connections` between nodes.  
-   - CREATE proper `Comments` for all the nodes so user understands what they do
+   - CREATE proper `Comments` for every node separately so user understands what they do
 
 6. **EDGE CASES**  
    - HANDLE missing credentials (insert `"{{CREDENTIAL_PLACEHOLDER}}"`).  
