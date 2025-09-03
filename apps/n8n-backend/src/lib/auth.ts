@@ -24,7 +24,7 @@ export const auth = betterAuth({
   },
   trustedOrigins: [
     "http://localhost:5000",
-    "chrome-extension://ldlfbgdnhkkhhkcilkeoaepgnpnbbeoc",
+    "chrome-extension://hfahcogmfllljipnnlehfnpgimfldnie",
   ],
 });
 

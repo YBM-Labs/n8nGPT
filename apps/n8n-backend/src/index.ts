@@ -4,6 +4,7 @@ import {
   convertToModelMessages,
   smoothStream,
   streamText,
+  experimental_createMCPClient,
   type UIMessage,
 } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
@@ -18,13 +19,18 @@ import { loadSystemPromptText } from "./utils/helperFunctions.js";
 dotenv.config();
 
 const app = new Hono();
-
+const mcpClient = await experimental_createMCPClient({
+  transport: {
+    type: "sse",
+    url: "https://mcp.context7.com/sse",
+  },
+});
 // better-auth routes
 app.all("/api/auth/**", async (c) => {
   return auth.handler(c.req.raw);
 });
 
-const EXTENSION_IDS = ["chrome-extension://ldlfbgdnhkkhhkcilkeoaepgnpnbbeoc"];
+const EXTENSION_IDS = ["chrome-extension://hfahcogmfllljipnnlehfnpgimfldnie"];
 const ALLOWED_ORIGINS = ["http://localhost:5000", ...EXTENSION_IDS];
 app.use(
   "/*",
@@ -75,7 +81,7 @@ app.post("/", async (c) => {
         400
       );
     }
-
+    const mcpTools = await mcpClient.tools();
     const result = streamText({
       model: openrouter(model || "openai/gpt-5"),
       messages: convertToModelMessages(messages),
@@ -90,6 +96,7 @@ app.post("/", async (c) => {
             json: z.string().describe("The JSON to paste in n8n."),
           }) as any,
         },
+        ...mcpTools,
       },
       system: SYSTEM_PROMPT,
     });
@@ -123,3 +130,6 @@ serve(
     console.log(`Server is running on http://localhost:${info.port}`);
   }
 );
+function createMCPClient(arg0: { transport: { type: string; url: string } }) {
+  throw new Error("Function not implemented.");
+}

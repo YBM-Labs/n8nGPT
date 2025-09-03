@@ -158,74 +158,76 @@ export default function App() {
   }, [isOnN8n, pendingPaste]);
 
   // AI chat hook (expects a backend handler; UI will still render without one)
-  const { messages, sendMessage, status, addToolResult, error } = useChat({
-    transport: new DefaultChatTransport({
-      api: import.meta.env.VITE_BACKEND_API ?? "http://localhost:5000",
-    }),
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-    onError: (error) => {
-      console.error("Chat error:", error.message);
-      // Check if it's a 403 error (generation limit reached)
-      if (error.message) {
-        try {
-          // Try to parse the error message for generation limit
-          const errorText = error.message;
-          if (errorText.includes("maximum number of generations")) {
-            setGenerationError(
-              "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue."
-            );
-          } else {
+  const { messages, sendMessage, status, addToolResult, error, stop } = useChat(
+    {
+      transport: new DefaultChatTransport({
+        api: import.meta.env.VITE_BACKEND_API ?? "http://localhost:5000",
+      }),
+      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      onError: (error) => {
+        console.error("Chat error:", error.message);
+        // Check if it's a 403 error (generation limit reached)
+        if (error.message) {
+          try {
+            // Try to parse the error message for generation limit
+            const errorText = error.message;
+            if (errorText.includes("maximum number of generations")) {
+              setGenerationError(
+                "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue."
+              );
+            } else {
+              setGenerationError(
+                "You have reached your monthly limit. Please try again next month."
+              );
+            }
+          } catch {
             setGenerationError(
               "You have reached your monthly limit. Please try again next month."
             );
           }
-        } catch {
+        } else {
           setGenerationError(
-            "You have reached your monthly limit. Please try again next month."
+            "An error occurred while processing your request. Please try again."
           );
         }
-      } else {
-        setGenerationError(
-          "An error occurred while processing your request. Please try again."
-        );
-      }
-    },
-    onToolCall: async ({ toolCall }) => {
-      if (toolCall.toolName === "paste_json_in_n8n") {
-        if (!isOnN8n) {
-          addToolResult({
-            tool: "paste_json_in_n8n",
-            toolCallId: toolCall.toolCallId,
-            output: `Not on an n8n tab. Open an n8n workflow page to paste.`,
-          });
-          return;
-        }
-        try {
-          let content: string;
-          if (
-            typeof toolCall.input === "object" &&
-            toolCall.input &&
-            "json" in toolCall.input
-          ) {
-            content = (toolCall.input as { json: string }).json;
-          } else if (typeof toolCall.input === "string") {
-            content = toolCall.input;
-          } else {
-            throw new Error("Invalid tool call input format");
+      },
+      onToolCall: async ({ toolCall }) => {
+        if (toolCall.toolName === "paste_json_in_n8n") {
+          if (!isOnN8n) {
+            addToolResult({
+              tool: "paste_json_in_n8n",
+              toolCallId: toolCall.toolCallId,
+              output: `Not on an n8n tab. Open an n8n workflow page to paste.`,
+            });
+            return;
           }
-          setPendingPaste({ json: content, toolCallId: toolCall.toolCallId });
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : "Unknown error occurred";
-          addToolResult({
-            tool: "paste_json_in_n8n",
-            toolCallId: toolCall.toolCallId,
-            output: `Error preparing paste: ${errorMessage}`,
-          });
+          try {
+            let content: string;
+            if (
+              typeof toolCall.input === "object" &&
+              toolCall.input &&
+              "json" in toolCall.input
+            ) {
+              content = (toolCall.input as { json: string }).json;
+            } else if (typeof toolCall.input === "string") {
+              content = toolCall.input;
+            } else {
+              throw new Error("Invalid tool call input format");
+            }
+            setPendingPaste({ json: content, toolCallId: toolCall.toolCallId });
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "paste_json_in_n8n",
+              toolCallId: toolCall.toolCallId,
+              output: `Error preparing paste: ${errorMessage}`,
+            });
+          }
         }
-      }
-    },
-  });
+      },
+    }
+  );
 
   // When assistant finishes a response, try to extract JSON from it and prompt immediately
   useEffect(() => {
