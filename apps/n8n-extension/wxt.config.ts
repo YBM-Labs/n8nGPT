@@ -14,7 +14,7 @@ export default defineConfig({
       "clipboardWrite",
       "clipboardRead",
       "cookies",
-      // Dynamic permissions for n8n instances will be requested at runtime
+      // Dynamic permissions for n8n instances will be requested at runtime sda
     ],
     optional_host_permissions: ["https://*/*", "http://*/*"],
     content_security_policy: {
@@ -31,30 +31,30 @@ export default defineConfig({
       },
     },
     // Preserve streaming functionality in production
-    build: {
-      sourcemap: false,
-      minify: "esbuild",
-      rollupOptions: {
-        output: {
-          // Preserve function names for streaming
-          preserveModules: false,
-        },
-      },
-    },
-    // Disable HMR and other dev features
-    server: {
-      hmr: false,
-    },
+    // build: {
+    //   sourcemap: false,
+    //   minify: "esbuild",
+    //   rollupOptions: {
+    //     output: {
+    //       // Preserve function names for streaming
+    //       preserveModules: false,
+    //     },
+    //   },
+    // },
+    // // Disable HMR and other dev features
+    // server: {
+    //   hmr: false, asd
+    // },
     // Preserve streaming-related code
     define: {
       __DEV__: false,
       // Ensure streaming works in production
       "process.env.NODE_ENV": '"production"',
     },
-    // Optimize for streaming performance
-    optimizeDeps: {
-      include: ["streamdown", "@ai-sdk/react"],
-    },
+    // // Optimize for streaming performance
+    // optimizeDeps: {
+    //   include: ["streamdown", "@ai-sdk/react"],
+    // },
   }),
   webExt: {
     disabled: true,

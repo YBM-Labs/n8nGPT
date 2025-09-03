@@ -709,8 +709,11 @@ export default function App() {
                     </PromptInputModelSelect>
                   </PromptInputTools>
                   <PromptInputSubmit
-                    disabled={input.trim().length === 0}
+                    disabled={
+                      input.trim().length === 0 && status !== "streaming"
+                    }
                     status={status}
+                    stop={stop}
                   />
                 </PromptInputToolbar>
               </PromptInput>
