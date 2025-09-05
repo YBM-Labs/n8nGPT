@@ -17,7 +17,6 @@ export default function AuthPanel() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Form validation
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email) {
