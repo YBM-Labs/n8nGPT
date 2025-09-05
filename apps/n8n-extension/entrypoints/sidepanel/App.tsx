@@ -93,6 +93,7 @@ const extractJsonFromText = (text: string): string | null => {
 };
 
 export default function App() {
+  const [forceSessionRefresh, setForceSessionRefresh] = useState(0);
   const { data: session, isPending } = authClient.useSession();
 
   const MODELS: ReadonlyArray<{ name: string; value: string }> = [
@@ -108,7 +109,7 @@ export default function App() {
   // Local chat UI state
   const [input, setInput] = useState<string>("");
   const [model, setModel] = useState<string>(
-    MODELS[0]?.value ?? "openai/gpt-4o"
+    MODELS[3]?.value ?? "openai/gpt-4o"
   );
   const [webSearch, setWebSearch] = useState<boolean>(false);
   const [isPasting, setIsPasting] = useState<boolean>(false);
@@ -127,6 +128,44 @@ export default function App() {
       console.error(error);
     }
   };
+
+  // Listen for OAuth callback from background script
+  useEffect(() => {
+    const handleOAuthCallback = async (message: any) => {
+      if (message.type === "OAUTH_CALLBACK") {
+        console.log("OAuth callback received in App component:", message.url);
+        
+        // Wait a bit for the backend to process the OAuth callback
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Force refresh the session
+        try {
+          await authClient.getSession();
+          console.log("Session refreshed in App component");
+          
+          // Force component re-render by updating state
+          setForceSessionRefresh(prev => prev + 1);
+          
+          // Also try to reload the sidepanel after a short delay
+          setTimeout(() => {
+            window.location.reload();
+          }, 500);
+        } catch (error) {
+          console.error("Failed to refresh session in App:", error);
+          // Even if session refresh fails, reload the page
+          setTimeout(() => {
+            window.location.reload();
+          }, 500);
+        }
+      }
+    };
+
+    browser.runtime.onMessage.addListener(handleOAuthCallback);
+    
+    return () => {
+      browser.runtime.onMessage.removeListener(handleOAuthCallback);
+    };
+  }, []);
   // Keep isOnN8n in sync with active tab
   useEffect(() => {
     const update = async () => {
@@ -565,7 +604,7 @@ export default function App() {
                       )}
                       <Message
                         from={message.role}
-                        className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%]"
+                        className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%] [&>div]:min-w-0 [&>div]:overflow-hidden"
                       >
                         <MessageContent>
                           {parts.map((part, i) => {

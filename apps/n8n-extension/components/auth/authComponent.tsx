@@ -1,5 +1,6 @@
 import { authClient } from "@/lib/auth-client";
 import { useState, useEffect } from "react";
+import { browser } from "wxt/browser";
 
 export default function AuthPanel() {
   const [email, setEmail] = useState("");
@@ -16,6 +17,7 @@ export default function AuthPanel() {
     const timer = setTimeout(() => setShowForm(true), 300);
     return () => clearTimeout(timer);
   }, []);
+
 
   // Form validation
   const validateEmail = (email: string) => {
@@ -87,19 +89,37 @@ export default function AuthPanel() {
   };
 
   async function signInWithGoogle() {
-    const { data } = await authClient.signIn.social({
-      provider: "google",
-      callbackURL: "chrome-extension://" + browser.runtime.id,
-      disableRedirect: true,
-    });
+    setIsLoading(true);
+    setMessage("");
 
-    if (data?.url) {
-      browser.windows.create({
-        url: data.url,
-        type: "popup",
-        width: 500,
-        height: 600,
+    try {
+      const { data, error } = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "chrome-extension://" + browser.runtime.id,
+        disableRedirect: true,
       });
+
+      if (error) {
+        setMessage(`Google sign-in failed: ${error.message}`);
+        return;
+      }
+
+      if (data?.url) {
+        browser.windows.create({
+          url: data.url,
+          type: "popup",
+          width: 500,
+          height: 600,
+        });
+        setMessage("Opening Google sign-in...");
+      } else {
+        setMessage("Failed to initiate Google sign-in");
+      }
+    } catch (err) {
+      setMessage("An unexpected error occurred during Google sign-in");
+      console.error("Google sign-in error:", err);
+    } finally {
+      setIsLoading(false);
     }
   }
 

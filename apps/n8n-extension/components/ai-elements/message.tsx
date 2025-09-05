@@ -33,13 +33,13 @@ export const MessageContent = ({
   <div
     className={cn(
       'flex flex-col gap-2 overflow-hidden rounded-lg px-4 py-3 text-foreground text-sm',
-      'group-[.is-user]:bg-primary group-[.is-user]:text-primary-foreground',
-      'group-[.is-assistant]:bg-secondary group-[.is-assistant]:text-foreground',
+      'group-[.is-user]:bg-secondary group-[.is-user]:text-secondary-foreground',
+      'group-[.is-assistant]:bg-primary group-[.is-assistant]:text-primary-foreground',
       className
     )}
     {...props}
   >
-    <div className="is-user:dark">{children}</div>
+    <div className="is-user:dark min-w-0 overflow-hidden">{children}</div>
   </div>
 );
 
@@ -55,7 +55,7 @@ export const MessageAvatar = ({
   ...props
 }: MessageAvatarProps) => (
   <Avatar
-    className={cn('size-8 ring ring-1 ring-border', className)}
+    className={cn('size-8 ring ring-border', className)}
     {...props}
   >
     <AvatarImage alt="" className="mt-0 mb-0" src={src} />

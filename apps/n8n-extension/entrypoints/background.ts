@@ -23,6 +23,39 @@ export default defineBackground({
       id: browser.runtime.id,
     });
 
+    // Handle OAuth popup callbacks
+    browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+      // Check if this is a popup window and the URL contains our extension ID
+      if (changeInfo.status === "complete" && tab.url) {
+        const extensionId = browser.runtime.id;
+        const expectedCallbackUrl = `chrome-extension://${extensionId}`;
+        
+        // Check if this is an OAuth callback to our extension
+        if (tab.url.startsWith(expectedCallbackUrl)) {
+          console.log("OAuth callback detected:", tab.url);
+          
+          // Close the popup window
+          if (tab.windowId) {
+            try {
+              await browser.windows.remove(tab.windowId);
+            } catch (error) {
+              console.log("Could not close popup window:", error);
+            }
+          }
+          
+          // Notify the sidepanel that auth is complete
+          try {
+            await browser.runtime.sendMessage({
+              type: "OAUTH_CALLBACK",
+              url: tab.url,
+            });
+          } catch (error) {
+            console.log("Could not send OAuth callback message:", error);
+          }
+        }
+      }
+    });
+
     /**
      * Handle messages from sidepanel and content scripts
      */

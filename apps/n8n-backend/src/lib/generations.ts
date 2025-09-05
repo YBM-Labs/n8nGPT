@@ -1,7 +1,6 @@
 import { prisma } from "./db.js";
 
 export const getGenerations = async (userId: string) => {
-  
   const generations = await prisma.user.findUnique({
     where: { id: userId },
     select: {
