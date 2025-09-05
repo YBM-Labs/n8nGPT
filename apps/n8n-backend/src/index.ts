@@ -30,7 +30,7 @@ app.all("/api/auth/**", async (c) => {
   return auth.handler(c.req.raw);
 });
 
-const EXTENSION_IDS = ["chrome-extension://nipieiibjpnednoffcjnjdgmbfdnencb"];
+const EXTENSION_IDS = [""];
 const ALLOWED_ORIGINS = ["http://localhost:5000", ...EXTENSION_IDS];
 app.use(
   "/*",

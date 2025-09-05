@@ -12,6 +12,10 @@ export const auth = betterAuth({
   },
   socialProviders: {
     // Intentionally empty for now; enable Google later
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
   },
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 days
@@ -22,10 +26,7 @@ export const auth = betterAuth({
       enabled: false,
     },
   },
-  trustedOrigins: [
-    "http://localhost:5000",
-    "chrome-extension://nipieiibjpnednoffcjnjdgmbfdnencb",
-  ],
+  trustedOrigins: ["*"],
 });
 
 export type Session = typeof auth.$Infer.Session;

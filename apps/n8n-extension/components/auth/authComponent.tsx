@@ -86,6 +86,23 @@ export default function AuthPanel() {
     }
   };
 
+  async function signInWithGoogle() {
+    const { data } = await authClient.signIn.social({
+      provider: "google",
+      callbackURL: "chrome-extension://" + browser.runtime.id,
+      disableRedirect: true,
+    });
+
+    if (data?.url) {
+      browser.windows.create({
+        url: data.url,
+        type: "popup",
+        width: 500,
+        height: 600,
+      });
+    }
+  }
+
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setEmail(e.target.value);
     if (emailError) validateEmail(e.target.value);
@@ -223,6 +240,20 @@ export default function AuthPanel() {
               disabled={isLoading}
             >
               {isLoading ? "Creating account..." : "Create Account"}
+            </button>
+
+            <button
+              className={`font-medium rounded-xl border px-4 py-3 w-full transition-all duration-200 ease-in-out
+                ${
+                  isLoading
+                    ? "border-muted text-muted-foreground cursor-not-allowed"
+                    : "border-border text-foreground hover:border-primary hover:bg-primary/5 hover:scale-[1.02] active:scale-[0.98]"
+                }
+              `}
+              onClick={signInWithGoogle}
+              disabled={isLoading}
+            >
+              {isLoading ? "Google sign in..." : "Google"}
             </button>
           </div>
 
