@@ -46,7 +46,7 @@ export default defineContentScript({
         const btn = document.createElement("button");
         btn.id = "n8n-gpt-send-btn";
         btn.type = "button";
-        btn.textContent = "Send to n8nGPT";
+        btn.textContent = "n8nGPT";
         btn.setAttribute("aria-label", "Send workflow JSON to n8nGPT");
         btn.style.cssText = `
           position: fixed;

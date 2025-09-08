@@ -225,6 +225,115 @@ export default function App() {
     if (!isOnN8n && pendingPaste) setPendingPaste(null);
   }, [isOnN8n, pendingPaste]);
 
+  /**
+   * Click the in-page floating button with id "n8n-gpt-send-btn" to trigger
+   * the content script's capture of the current workflow JSON.
+   */
+  const clickSendButtonOnPage = async (): Promise<void> => {
+    const [tab] = await browser.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    const tabId = typeof tab?.id === "number" ? tab.id : null;
+    const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+
+    if (tabId === null || tabUrl.length === 0) {
+      throw new Error("No active tab found");
+    }
+
+    if (!isN8nInstance(tabUrl)) {
+      throw new Error(
+        "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+      );
+    }
+
+    const url = new URL(tabUrl);
+    try {
+      const hostPermissions = createN8nHostPermissions(url.hostname);
+      const hasPermission = await browser.permissions.contains({
+        origins: hostPermissions,
+      });
+      if (!hasPermission) {
+        try {
+          await browser.permissions.request({ origins: hostPermissions });
+        } catch {}
+      }
+    } catch {}
+
+    const result = await browser.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: () => {
+        try {
+          const btn = document.getElementById("n8n-gpt-send-btn");
+          if (!btn) {
+            throw new Error("n8n-gpt-send-btn not found on page");
+          }
+          // const el = btn as HTMLButtonElement;
+          // el.dispatchEvent(
+          //   new MouseEvent("mousedown", { bubbles: true, cancelable: true })
+          // );
+          // el.dispatchEvent(
+          //   new MouseEvent("mouseup", { bubbles: true, cancelable: true })
+          // );
+          // el.dispatchEvent(
+          //   new MouseEvent("click", { bubbles: true, cancelable: true })
+          // );
+
+          btn.click();
+          return { success: true } as const;
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error";
+          return { success: false, message } as const;
+        }
+      },
+    });
+
+    const scriptResult = result[0]?.result as
+      | { success: true }
+      | { success: false; message: string }
+      | undefined;
+
+    if (!scriptResult || scriptResult.success !== true) {
+      throw new Error(
+        (scriptResult && "message" in scriptResult
+          ? scriptResult.message
+          : null) || "Failed to click send button"
+      );
+    }
+  };
+
+  /**
+   * Wait for `workflowJsonRef.current` to become a different non-empty value
+   * than `previous`, or resolve with null after the timeout.
+   */
+  const waitForWorkflowJsonUpdate = (
+    previous: string | null,
+    timeoutMs: number
+  ): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const check = (): void => {
+        const current = workflowJsonRef.current;
+        if (
+          typeof current === "string" &&
+          current.length > 0 &&
+          current !== previous
+        ) {
+          resolve(current);
+          return;
+        }
+        if (Date.now() - start >= timeoutMs) {
+          resolve(null);
+          return;
+        }
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  };
+
   // AI chat hook (expects a backend handler; UI will still render without one)
   const {
     messages,
@@ -302,15 +411,40 @@ export default function App() {
       }
 
       if (toolCall.toolName === "get_current_workflow") {
-        // setSendingWorkflowJson(true);
-        // setToolCallId(toolCall.toolCallId);
-        const currentWorkflow = workflowJsonRef.current;
-        console.log("workflowJson", currentWorkflow);
-        addToolResult({
-          tool: "get_current_workflow",
-          toolCallId: toolCall.toolCallId,
-          output: currentWorkflow ?? "No workflow found",
-        });
+        // Before reading from the ref, trigger the in-page send button click
+        // so the content script captures the latest workflow JSON from n8n.
+        // if (!isOnN8n) {
+        //   addToolResult({
+        //     tool: "get_current_workflow",
+        //     toolCallId: toolCall.toolCallId,
+        //     output: "Not on an n8n tab. Open an n8n workflow page to fetch.",
+        //   });
+        //   return;
+        // }
+
+        const previousWorkflow = workflowJsonRef.current;
+        try {
+          await clickSendButtonOnPage();
+          // const updatedWorkflow = await waitForWorkflowJsonUpdate(
+          //   previousWorkflow,
+          //   2000
+          // );
+          // const output =
+          //   updatedWorkflow ?? previousWorkflow ?? "No workflow found";
+          addToolResult({
+            tool: "get_current_workflow",
+            toolCallId: toolCall.toolCallId,
+            output: previousWorkflow ?? "No workflow found",
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error occurred";
+          addToolResult({
+            tool: "get_current_workflow",
+            toolCallId: toolCall.toolCallId,
+            output: `Failed to click or retrieve workflow: ${message}`,
+          });
+        }
         return;
       }
     },
