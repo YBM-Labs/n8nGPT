@@ -16,14 +16,16 @@ import dotenv from "dotenv";
 import { auth } from "./lib/auth.js";
 import { getGenerations, incrementGenerations } from "./lib/generations.js";
 import { loadSystemPromptText } from "./utils/helperFunctions.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 dotenv.config();
 
 const app = new Hono();
 const mcpClient = await experimental_createMCPClient({
-  transport: {
-    type: "sse",
-    url: "https://mcp.context7.com/sse",
-  },
+  transport: new StreamableHTTPClientTransport(
+    new URL(
+      `https://server.smithery.ai/@upstash/context7-mcp/mcp?api_key=${process.env.SMITHERY_API_KEY}`
+    )
+  ),
 });
 // better-auth routes
 app.all("/api/auth/**", async (c) => {
@@ -35,13 +37,10 @@ const ALLOWED_ORIGINS = ["http://localhost:5000", ...EXTENSION_IDS];
 app.use(
   "/*",
   cors({
-    origin: (origin) =>
-      origin && ALLOWED_ORIGINS.includes(origin) ? origin : "",
-    allowHeaders: ["Content-Type", "Authorization"],
+    origin: "*",
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    credentials: true,
-    exposeHeaders: ["Set-Cookie"],
-    maxAge: 86400,
+    allowHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    credentials: false,
   })
 );
 
@@ -49,11 +48,12 @@ app.use(
 const SYSTEM_PROMPT: string = loadSystemPromptText();
 
 app.post("/", async (c) => {
+  console.log("Request received");
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) {
     return c.json({ error: "Unauthorized" }, 401);
   }
-
+  console.log("Session found");
   const { generations, reset } = await getGenerations(session.user.id);
 
   if (generations >= 100) {
@@ -65,12 +65,13 @@ app.post("/", async (c) => {
       403
     );
   }
+  console.log("Generations found");
 
   const { OPENROUTER_API_KEY } = env<{ OPENROUTER_API_KEY: string }>(c);
   const openrouter = createOpenRouter({
     apiKey: OPENROUTER_API_KEY,
   });
-
+  console.log("Openrouter created");
   try {
     const { messages, model }: { messages: UIMessage[]; model?: string } =
       await c.req.json();

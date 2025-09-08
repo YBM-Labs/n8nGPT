@@ -3,7 +3,11 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "build:extension": "turbo run build --filter=n8ngpt",
+    "build:backend": "turbo run build --filter=n8ngpt-backend",
     "dev": "turbo run dev",
+    "dev:extension": "turbo run dev --filter=n8ngpt",
+    "dev:backend": "turbo run dev --filter=n8ngpt-backend",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types"
