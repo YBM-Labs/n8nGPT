@@ -49,6 +49,7 @@ import {
 } from "ai";
 import { authClient } from "@/lib/auth-client";
 import AuthPanel from "@/components/auth/authComponent";
+import ShinyText from "@/components/ShinyText";
 
 // ----- Message part type guards to avoid unsafe casts -----
 type SourceUrlPart = { type: "source-url"; url: string };
@@ -832,18 +833,33 @@ export default function App() {
                                 </Response>
                               );
                             }
-                            if (isReasoningPart(part)) {
+                            if (
+                              isReasoningPart(part) &&
+                              status === "streaming"
+                            ) {
                               return (
-                                <Reasoning
-                                  key={`${message.id}-${i}`}
-                                  className="w-full"
-                                  isStreaming={status === "streaming"}
+                                // <Reasoning
+                                //   key={`${message.id}-${i}`}
+                                //   className="w-full"
+                                //   isStreaming={status === "streaming"}
+                                // >
+                                //   <ReasoningTrigger />
+                                //   <ReasoningContent>
+                                //     {part.text}
+                                //   </ReasoningContent>
+                                // </Reasoning>
+                                <Button
+                                  // disabled
+                                  variant={"secondary"}
+                                  className="w-fit hover:bg-secondary"
                                 >
-                                  <ReasoningTrigger />
-                                  <ReasoningContent>
-                                    {part.text}
-                                  </ReasoningContent>
-                                </Reasoning>
+                                  <ShinyText
+                                    text="Brainstorming.."
+                                    speed={3}
+                                    // className="!text-primary-foreground font-medium"
+                                  />
+                                </Button>
+                                //asd
                               );
                             }
                             return null;
