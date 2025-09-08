@@ -261,6 +261,19 @@ export default function App() {
       }
     } catch {}
 
+    // First try the message-based capture (runs within content-script context)
+    try {
+      const response = await browser.tabs.sendMessage(tabId, {
+        type: "CAPTURE_WORKFLOW_JSON",
+      } as const);
+      if (response && response.success === true) {
+        return;
+      }
+    } catch {
+      // tabs.sendMessage can fail if the content script isn't injected yet
+    }
+
+    // Fallback: click the floating button directly in the page
     const result = await browser.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
@@ -270,18 +283,17 @@ export default function App() {
           if (!btn) {
             throw new Error("n8n-gpt-send-btn not found on page");
           }
-          // const el = btn as HTMLButtonElement;
-          // el.dispatchEvent(
-          //   new MouseEvent("mousedown", { bubbles: true, cancelable: true })
-          // );
-          // el.dispatchEvent(
-          //   new MouseEvent("mouseup", { bubbles: true, cancelable: true })
-          // );
-          // el.dispatchEvent(
-          //   new MouseEvent("click", { bubbles: true, cancelable: true })
-          // );
+          const el = btn as HTMLButtonElement;
+          el.dispatchEvent(
+            new MouseEvent("mousedown", { bubbles: true, cancelable: true })
+          );
+          el.dispatchEvent(
+            new MouseEvent("mouseup", { bubbles: true, cancelable: true })
+          );
+          el.dispatchEvent(
+            new MouseEvent("click", { bubbles: true, cancelable: true })
+          );
 
-          btn.click();
           return { success: true } as const;
         } catch (error) {
           const message =
@@ -303,36 +315,6 @@ export default function App() {
           : null) || "Failed to click send button"
       );
     }
-  };
-
-  /**
-   * Wait for `workflowJsonRef.current` to become a different non-empty value
-   * than `previous`, or resolve with null after the timeout.
-   */
-  const waitForWorkflowJsonUpdate = (
-    previous: string | null,
-    timeoutMs: number
-  ): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      const check = (): void => {
-        const current = workflowJsonRef.current;
-        if (
-          typeof current === "string" &&
-          current.length > 0 &&
-          current !== previous
-        ) {
-          resolve(current);
-          return;
-        }
-        if (Date.now() - start >= timeoutMs) {
-          resolve(null);
-          return;
-        }
-        setTimeout(check, 100);
-      };
-      check();
-    });
   };
 
   // AI chat hook (expects a backend handler; UI will still render without one)

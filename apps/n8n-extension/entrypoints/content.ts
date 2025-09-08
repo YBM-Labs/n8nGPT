@@ -197,6 +197,152 @@ export default defineContentScript({
       browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.type === "PING_N8N_PAGE") {
           sendResponse({ isN8nPage: true });
+          return;
+        }
+
+        // Programmatically trigger the same capture flow as the FAB button
+        if (message.type === "CAPTURE_WORKFLOW_JSON") {
+          const selectors = getN8nCanvasSelectors();
+          const getCanvas = (): HTMLElement | null => {
+            for (const selector of selectors) {
+              const el = document.querySelector(selector);
+              if (el instanceof HTMLElement) return el;
+            }
+            return null;
+          };
+
+          const focusForShortcuts = (element: HTMLElement): void => {
+            try {
+              window.focus();
+              document.body?.focus?.();
+              element.focus();
+              element.dispatchEvent(
+                new MouseEvent("mousedown", { bubbles: true, cancelable: true })
+              );
+              element.dispatchEvent(
+                new MouseEvent("mouseup", { bubbles: true, cancelable: true })
+              );
+              element.dispatchEvent(
+                new MouseEvent("click", { bubbles: true, cancelable: true })
+              );
+            } catch {}
+          };
+
+          const dispatchShortcut = (
+            target: EventTarget,
+            key: string,
+            code: string
+          ): void => {
+            const down = new KeyboardEvent("keydown", {
+              key,
+              code,
+              ctrlKey: true,
+              bubbles: true,
+              cancelable: true,
+            });
+            const up = new KeyboardEvent("keyup", {
+              key,
+              code,
+              ctrlKey: true,
+              bubbles: true,
+              cancelable: true,
+            });
+            (target as HTMLElement).dispatchEvent(down);
+            (target as HTMLElement).dispatchEvent(up);
+          };
+
+          const getFromClipboardData = (cd: DataTransfer | null): string => {
+            if (!cd) return "";
+            const preferredTypes = ["application/json", "text/plain", "text"];
+            for (const t of preferredTypes) {
+              try {
+                const v = cd.getData(t);
+                if (typeof v === "string" && v.length > 0) return v;
+              } catch {}
+            }
+            try {
+              const types = Array.from(cd.types ?? []);
+              for (const t of types) {
+                const v = cd.getData(t);
+                if (typeof v === "string" && v.length > 0) return v;
+              }
+            } catch {}
+            return "";
+          };
+
+          try {
+            const canvas = getCanvas();
+            if (!canvas) {
+              sendResponse({
+                success: false,
+                message: "No canvas element found",
+              });
+              return true;
+            }
+
+            let captured = "";
+            const onCopy = (e: ClipboardEvent): void => {
+              try {
+                const data = getFromClipboardData(e.clipboardData ?? null);
+                if (data.length > 0) {
+                  captured = data;
+                }
+              } catch {}
+            };
+
+            focusForShortcuts(canvas);
+            document.addEventListener("copy", onCopy, {
+              capture: true,
+              once: true,
+            } as AddEventListenerOptions);
+            // Select all nodes, then copy
+            dispatchShortcut(canvas, "a", "KeyA");
+            dispatchShortcut(canvas, "c", "KeyC");
+            try {
+              document.execCommand("copy");
+            } catch {}
+
+            const finish = async () => {
+              // Allow time for clipboard to populate
+              await new Promise((r) => setTimeout(r, 180));
+              if (captured.length === 0) {
+                try {
+                  const text = await navigator.clipboard.readText();
+                  if (typeof text === "string" && text.length > 0) {
+                    captured = text;
+                  }
+                } catch {}
+              }
+
+              if (captured.length > 0) {
+                try {
+                  await browser.runtime.sendMessage({
+                    type: "WORKFLOW_JSON",
+                    json: captured,
+                  });
+                } catch {}
+                sendResponse({ success: true });
+              } else {
+                sendResponse({
+                  success: false,
+                  message: "No workflow JSON captured",
+                });
+              }
+            };
+
+            // Resolve asynchronously
+            finish();
+            return true;
+          } catch (err) {
+            sendResponse({
+              success: false,
+              message:
+                err instanceof Error
+                  ? err.message
+                  : "Unknown error during capture",
+            });
+            return true;
+          }
         }
       });
     }
