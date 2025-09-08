@@ -44,6 +44,7 @@ import {
 } from "@/components/ai-elements/reasoning";
 import {
   DefaultChatTransport,
+  generateId,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai";
 import { authClient } from "@/lib/auth-client";
@@ -53,6 +54,8 @@ import AuthPanel from "@/components/auth/authComponent";
 type SourceUrlPart = { type: "source-url"; url: string };
 type TextPart = { type: "text"; text: string };
 type ReasoningPart = { type: "reasoning"; text: string };
+
+type WorkflowJsonMessage = { type: "WORKFLOW_JSON"; json: string };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -65,6 +68,9 @@ const isTextPart = (part: unknown): part is TextPart =>
 
 const isReasoningPart = (part: unknown): part is ReasoningPart =>
   isRecord(part) && part.type === "reasoning" && typeof part.text === "string";
+
+const isWorkflowJsonMessage = (msg: unknown): msg is WorkflowJsonMessage =>
+  isRecord(msg) && msg.type === "WORKFLOW_JSON" && typeof msg.json === "string";
 
 // Extract JSON block from assistant text (```json ... ``` or first {...} block)
 const extractJsonFromText = (text: string): string | null => {
@@ -121,6 +127,15 @@ export default function App() {
   const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
+  const [workflowJson, setWorkflowJson] = useState<string | null>(null);
+  const [sendingWorkflowJson, setSendingWorkflowJson] =
+    useState<boolean>(false);
+  const [toolCallId, setToolCallId] = useState<string | null>(null);
+  // Keep a ref in sync to avoid stale closures inside handlers
+  const workflowJsonRef = useRef<string | null>(null);
+  useEffect(() => {
+    workflowJsonRef.current = workflowJson;
+  }, [workflowJson]);
 
   const signOut = async () => {
     const { error } = await authClient.signOut();
@@ -129,23 +144,36 @@ export default function App() {
     }
   };
 
+  // Receive workflow JSON from content script and store + log it
+  useEffect(() => {
+    const onMessage = (message: unknown) => {
+      if (isWorkflowJsonMessage(message)) {
+        setWorkflowJson(message.json);
+        // eslint-disable-next-line no-console
+        console.log("[n8n-gpt] Workflow JSON from page:\n", message.json);
+      }
+    };
+    browser.runtime.onMessage.addListener(onMessage);
+    return () => browser.runtime.onMessage.removeListener(onMessage);
+  }, []);
+
   // Listen for OAuth callback from background script
   useEffect(() => {
     const handleOAuthCallback = async (message: any) => {
       if (message.type === "OAUTH_CALLBACK") {
         console.log("OAuth callback received in App component:", message.url);
-        
+
         // Wait a bit for the backend to process the OAuth callback
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
         // Force refresh the session
         try {
           await authClient.getSession();
           console.log("Session refreshed in App component");
-          
+
           // Force component re-render by updating state
-          setForceSessionRefresh(prev => prev + 1);
-          
+          setForceSessionRefresh((prev) => prev + 1);
+
           // Also try to reload the sidepanel after a short delay
           setTimeout(() => {
             window.location.reload();
@@ -161,11 +189,12 @@ export default function App() {
     };
 
     browser.runtime.onMessage.addListener(handleOAuthCallback);
-    
+
     return () => {
       browser.runtime.onMessage.removeListener(handleOAuthCallback);
     };
   }, []);
+
   // Keep isOnN8n in sync with active tab
   useEffect(() => {
     const update = async () => {
@@ -197,76 +226,95 @@ export default function App() {
   }, [isOnN8n, pendingPaste]);
 
   // AI chat hook (expects a backend handler; UI will still render without one)
-  const { messages, sendMessage, status, addToolResult, error, stop } = useChat(
-    {
-      transport: new DefaultChatTransport({
-        api: import.meta.env.VITE_BACKEND_API ?? "http://localhost:5000",
-      }),
-      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-      onError: (error) => {
-        console.error("Chat error:", error.message);
-        // Check if it's a 403 error (generation limit reached)
-        if (error.message) {
-          try {
-            // Try to parse the error message for generation limit
-            const errorText = error.message;
-            if (errorText.includes("maximum number of generations")) {
-              setGenerationError(
-                "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue."
-              );
-            } else {
-              setGenerationError(
-                "You have reached your monthly limit. Please try again next month."
-              );
-            }
-          } catch {
+  const {
+    messages,
+    sendMessage,
+    status,
+    addToolResult,
+    error,
+    stop,
+    setMessages,
+  } = useChat({
+    transport: new DefaultChatTransport({
+      api: import.meta.env.VITE_BACKEND_API ?? "http://localhost:5000",
+    }),
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    onError: (error) => {
+      console.error("Chat error:", error.message);
+      // Check if it's a 403 error (generation limit reached)
+      if (error.message) {
+        try {
+          // Try to parse the error message for generation limit
+          const errorText = error.message;
+          if (errorText.includes("maximum number of generations")) {
+            setGenerationError(
+              "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue."
+            );
+          } else {
             setGenerationError(
               "You have reached your monthly limit. Please try again next month."
             );
           }
-        } else {
+        } catch {
           setGenerationError(
-            "An error occurred while processing your request. Please try again."
+            "You have reached your monthly limit. Please try again next month."
           );
         }
-      },
-      onToolCall: async ({ toolCall }) => {
-        if (toolCall.toolName === "paste_json_in_n8n") {
-          if (!isOnN8n) {
-            addToolResult({
-              tool: "paste_json_in_n8n",
-              toolCallId: toolCall.toolCallId,
-              output: `Not on an n8n tab. Open an n8n workflow page to paste.`,
-            });
-            return;
-          }
-          try {
-            let content: string;
-            if (
-              typeof toolCall.input === "object" &&
-              toolCall.input &&
-              "json" in toolCall.input
-            ) {
-              content = (toolCall.input as { json: string }).json;
-            } else if (typeof toolCall.input === "string") {
-              content = toolCall.input;
-            } else {
-              throw new Error("Invalid tool call input format");
-            }
-            setPendingPaste({ json: content, toolCallId: toolCall.toolCallId });
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : "Unknown error occurred";
-            addToolResult({
-              tool: "paste_json_in_n8n",
-              toolCallId: toolCall.toolCallId,
-              output: `Error preparing paste: ${errorMessage}`,
-            });
-          }
+      } else {
+        setGenerationError(
+          "An error occurred while processing your request. Please try again."
+        );
+      }
+    },
+    onToolCall: async ({ toolCall }) => {
+      if (toolCall.toolName === "paste_json_in_n8n") {
+        if (!isOnN8n) {
+          addToolResult({
+            tool: "paste_json_in_n8n",
+            toolCallId: toolCall.toolCallId,
+            output: `Not on an n8n tab. Open an n8n workflow page to paste.`,
+          });
+          return;
         }
-      },
-    }
-  );
+        try {
+          let content: string;
+          if (
+            typeof toolCall.input === "object" &&
+            toolCall.input &&
+            "json" in toolCall.input
+          ) {
+            content = (toolCall.input as { json: string }).json;
+          } else if (typeof toolCall.input === "string") {
+            content = toolCall.input;
+          } else {
+            throw new Error("Invalid tool call input format");
+          }
+          setPendingPaste({ json: content, toolCallId: toolCall.toolCallId });
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : "Unknown error occurred";
+          addToolResult({
+            tool: "paste_json_in_n8n",
+            toolCallId: toolCall.toolCallId,
+            output: `Error preparing paste: ${errorMessage}`,
+          });
+        }
+      }
+
+      if (toolCall.toolName === "get_current_workflow") {
+        // setSendingWorkflowJson(true);
+        // setToolCallId(toolCall.toolCallId);
+        const currentWorkflow = workflowJsonRef.current;
+        console.log("workflowJson", currentWorkflow);
+        addToolResult({
+          tool: "get_current_workflow",
+          toolCallId: toolCall.toolCallId,
+          output: currentWorkflow ?? "No workflow found",
+        });
+        return;
+      }
+    },
+  });
 
   // When assistant finishes a response, try to extract JSON from it and prompt immediately
   useEffect(() => {
@@ -303,6 +351,8 @@ export default function App() {
     };
     getGenerations();
   }, [session, messages]);
+
+  console.log("workflowJson6969", workflowJson);
 
   const handleConfirmPaste = async (): Promise<void> => {
     if (!pendingPaste || !isOnN8n) return;
@@ -360,15 +410,44 @@ export default function App() {
     // Clear any previous generation errors
     setGenerationError(null);
 
+    // if (workflowJson) {
+    //   setMessages((prevMessages) => [
+    //     ...prevMessages,
+    //     {
+    //       id: generateId(),
+    //       role: "system",
+    //       parts: [
+    //         {
+    //           type: "text",
+    //           text: "This is the current workflow present on the n8n canvas.",
+    //         },
+    //         {
+    //           type: "data-json",
+    //           data: workflowJson,
+    //         },
+    //       ],
+    //     },
+    //   ]);
+    // }
+
     sendMessage(
-      { text: trimmed },
+      {
+        parts: [
+          {
+            type: "text",
+            text: trimmed,
+          },
+        ],
+      },
       {
         body: {
           model,
           webSearch,
+          // workflowJson,
         },
       }
     );
+
     setInput("");
   };
 
@@ -484,7 +563,11 @@ export default function App() {
                     fallbackError
                   );
                   throw new Error(
-                    `Failed to write to clipboard: ${clipError instanceof Error ? clipError.message : "Unknown error"}`
+                    `Failed to write to clipboard: ${
+                      clipError instanceof Error
+                        ? clipError.message
+                        : "Unknown error"
+                    }`
                   );
                 }
               }

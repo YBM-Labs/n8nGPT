@@ -6,6 +6,7 @@ import {
   streamText,
   experimental_createMCPClient,
   type UIMessage,
+  generateId,
 } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { cors } from "hono/cors";
@@ -73,8 +74,16 @@ app.post("/", async (c) => {
   });
   console.log("Openrouter created");
   try {
-    const { messages, model }: { messages: UIMessage[]; model?: string } =
-      await c.req.json();
+    const {
+      messages,
+      model,
+      // workflowJson,
+    }: {
+      messages: UIMessage[];
+      model?: string;
+
+      // workflowJson?: string
+    } = await c.req.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return c.json(
@@ -82,6 +91,25 @@ app.post("/", async (c) => {
         400
       );
     }
+
+    // if (workflowJson) {
+    //   messages.push({
+    //     id: generateId(),
+    //     role: "system",
+    //     parts: [
+    //       {
+    //         type: "text",
+    //         text: "This is the current workflow present on the n8n canvas.",
+    //       },
+    //       {
+    //         type: "data-json",
+    //         data: workflowJson ?? "",
+    //       },
+    //     ],
+    //   });
+    // }
+
+    // console.log("workflowJson", workflowJson);
     const mcpTools = await mcpClient.tools();
     const result = streamText({
       model: openrouter(model || "openai/gpt-5"),
@@ -92,9 +120,19 @@ app.post("/", async (c) => {
       }),
       tools: {
         paste_json_in_n8n: {
-          description: "Paste the JSON in n8n.",
+          description:
+            "Paste the JSON in n8n. This tool is used to paste the JSON in n8n.",
           inputSchema: z.object({
             json: z.string().describe("The JSON to paste in n8n."),
+          }) as any,
+        },
+        get_current_workflow: {
+          description:
+            "Get the current workflow in n8n. This tool is used to get the current workflow in n8n.",
+          inputSchema: z.object({
+            toggle: z
+              .boolean()
+              .describe("The toggle to get the current workflow in n8n."),
           }) as any,
         },
         ...mcpTools,
