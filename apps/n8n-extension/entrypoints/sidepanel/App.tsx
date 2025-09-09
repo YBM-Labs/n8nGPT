@@ -1993,7 +1993,7 @@ export default function App() {
             </div>
             <Conversation className="h-full">
               <ConversationContent className="pb-24">
-                {messages.map((message) => {
+                {messages.map((message, messageIndex) => {
                   const parts = Array.isArray(
                     (message as { parts?: unknown[] }).parts
                   )
@@ -2003,6 +2003,11 @@ export default function App() {
                     .filter(isSourceUrlPart)
                     .map((p) => p.url);
                   const sourceCount = sourceUrls.length;
+                  const isLastMessage = messageIndex === messages.length - 1;
+                  const hasReasoningPart = parts.some(isReasoningPart);
+                  const hasTextContent = parts.some(isTextPart);
+                  const showBrainstorming = isLastMessage && hasReasoningPart && status === "streaming" && !hasTextContent;
+                  
                   return (
                     <div key={message.id}>
                       {message.role === "assistant" && sourceCount > 0 && (
@@ -2019,36 +2024,35 @@ export default function App() {
                           </SourcesContent>
                         </Sources>
                       )}
-                      <Message
-                        from={message.role}
-                        className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%] [&>div]:min-w-0 [&>div]:overflow-hidden"
-                      >
-                        <MessageContent>
-                          {parts.map((part, i) => {
-                            if (isTextPart(part)) {
-                              return (
-                                <Response key={`${message.id}-${i}`}>
-                                  {part.text}
-                                </Response>
-                              );
-                            }
-                            if (
-                              isReasoningPart(part) &&
-                              status === "streaming"
-                            ) {
-                              return (
-                                <Button
-                                  variant={"secondary"}
-                                  className="w-fit hover:bg-secondary"
-                                >
-                                  <ShinyText text="Brainstorming.." speed={3} />
-                                </Button>
-                              );
-                            }
-                            return null;
-                          })}
-                        </MessageContent>
-                      </Message>
+                      {hasTextContent && (
+                        <Message
+                          from={message.role}
+                          className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%] [&>div]:min-w-0 [&>div]:overflow-hidden"
+                        >
+                          <MessageContent>
+                            {parts.map((part, i) => {
+                              if (isTextPart(part)) {
+                                return (
+                                  <Response key={`${message.id}-${i}`}>
+                                    {part.text}
+                                  </Response>
+                                );
+                              }
+                              return null;
+                            })}
+                          </MessageContent>
+                        </Message>
+                      )}
+                      {showBrainstorming && (
+                        <div className="ml-4 mt-2 mb-4 animate-in fade-in duration-300">
+                          <div className="flex items-center gap-3 w-fit px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
+                            <Loader />
+                            <span className="text-sm font-medium text-muted-foreground">
+                              <ShinyText text="Brainstorming.." speed={3} />
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
