@@ -820,28 +820,12 @@ export default function App() {
                               status === "streaming"
                             ) {
                               return (
-                                // <Reasoning
-                                //   key={`${message.id}-${i}`}
-                                //   className="w-full"
-                                //   isStreaming={status === "streaming"}
-                                // >
-                                //   <ReasoningTrigger />
-                                //   <ReasoningContent>
-                                //     {part.text}
-                                //   </ReasoningContent>
-                                // </Reasoning>
                                 <Button
-                                  // disabled
                                   variant={"secondary"}
                                   className="w-fit hover:bg-secondary"
                                 >
-                                  <ShinyText
-                                    text="Brainstorming.."
-                                    speed={3}
-                                    // className="!text-primary-foreground font-medium"
-                                  />
+                                  <ShinyText text="Brainstorming.." speed={3} />
                                 </Button>
-                                //asd
                               );
                             }
                             return null;
