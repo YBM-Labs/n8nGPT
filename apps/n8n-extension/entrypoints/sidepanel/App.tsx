@@ -56,8 +56,6 @@ type SourceUrlPart = { type: "source-url"; url: string };
 type TextPart = { type: "text"; text: string };
 type ReasoningPart = { type: "reasoning"; text: string };
 
-type WorkflowJsonMessage = { type: "WORKFLOW_JSON"; json: string };
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -69,9 +67,6 @@ const isTextPart = (part: unknown): part is TextPart =>
 
 const isReasoningPart = (part: unknown): part is ReasoningPart =>
   isRecord(part) && part.type === "reasoning" && typeof part.text === "string";
-
-const isWorkflowJsonMessage = (msg: unknown): msg is WorkflowJsonMessage =>
-  isRecord(msg) && msg.type === "WORKFLOW_JSON" && typeof msg.json === "string";
 
 // Extract JSON block from assistant text (```json ... ``` or first {...} block)
 const extractJsonFromText = (text: string): string | null => {
@@ -125,7 +120,6 @@ export default function App() {
   const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
-  const [workflowJson, setWorkflowJson] = useState<string | null>(null);
 
   const signOut = async () => {
     const { error } = await authClient.signOut();
@@ -133,19 +127,6 @@ export default function App() {
       console.error(error);
     }
   };
-
-  // Receive workflow JSON from content script and store + log it
-  useEffect(() => {
-    const onMessage = (message: unknown) => {
-      if (isWorkflowJsonMessage(message)) {
-        setWorkflowJson(message.json);
-        // eslint-disable-next-line no-console
-        console.log("[n8n-gpt] Workflow JSON from page:\n", message.json);
-      }
-    };
-    browser.runtime.onMessage.addListener(onMessage);
-    return () => browser.runtime.onMessage.removeListener(onMessage);
-  }, []);
 
   // Listen for OAuth callback from background script
   useEffect(() => {
@@ -275,9 +256,6 @@ export default function App() {
           const applied = await applyWorkflowModifications(modifications);
           if (applied) {
             const json = await fetchCurrentWorkflow();
-            if (typeof json === "string" && json.length > 0) {
-              setWorkflowJson(json);
-            }
             addToolResult({
               tool: "modify_workflow",
               toolCallId: toolCall.toolCallId,
@@ -301,8 +279,6 @@ export default function App() {
         }
         return;
       }
-
-      // overwrite_workflow removed
 
       if (toolCall.toolName === "write_workflow") {
         try {
@@ -351,9 +327,6 @@ export default function App() {
           const applied = await writeWorkflowFromJson(workflowJsonString);
           if (applied) {
             const json = await fetchCurrentWorkflow();
-            if (typeof json === "string" && json.length > 0) {
-              setWorkflowJson(json);
-            }
             addToolResult({
               tool: "write_workflow",
               toolCallId: toolCall.toolCallId,
@@ -382,7 +355,6 @@ export default function App() {
         try {
           const json = await fetchCurrentWorkflow();
           if (typeof json === "string" && json.length > 0) {
-            setWorkflowJson(json);
             addToolResult({
               tool: "get_current_workflow",
               toolCallId: toolCall.toolCallId,
@@ -412,9 +384,6 @@ export default function App() {
           const applied = await deleteCurrentWorkflowOnPage();
           if (applied) {
             const json = await fetchCurrentWorkflow();
-            if (typeof json === "string" && json.length > 0) {
-              setWorkflowJson(json);
-            }
             addToolResult({
               tool: "delete_workflow",
               toolCallId: toolCall.toolCallId,
@@ -471,9 +440,6 @@ export default function App() {
           });
           if (typeof addedId === "string" && addedId.length > 0) {
             const json = await fetchCurrentWorkflow();
-            if (typeof json === "string" && json.length > 0) {
-              setWorkflowJson(json);
-            }
             addToolResult({
               tool: "add_node",
               toolCallId: toolCall.toolCallId,
@@ -514,9 +480,6 @@ export default function App() {
           const ok = await deleteNodeOnPage({ nodeId });
           if (ok) {
             const json = await fetchCurrentWorkflow();
-            if (typeof json === "string" && json.length > 0) {
-              setWorkflowJson(json);
-            }
             addToolResult({
               tool: "delete_node",
               toolCallId: toolCall.toolCallId,
@@ -2061,39 +2024,29 @@ export default function App() {
                         className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%] [&>div]:min-w-0 [&>div]:overflow-hidden"
                       >
                         <MessageContent>
-                          {(() => {
-                            let hasShownBrainstorming = false;
-                            return parts.map((part, i) => {
-                              if (isTextPart(part)) {
-                                return (
-                                  <Response key={`${message.id}-${i}`}>
-                                    {part.text}
-                                  </Response>
-                                );
-                              }
-                              if (
-                                isReasoningPart(part) &&
-                                status === "streaming" &&
-                                !hasShownBrainstorming
-                              ) {
-                                hasShownBrainstorming = true;
-                                return (
-                                  <Button
-                                    key={`${message.id}-brainstorming`}
-                                    variant={"secondary"}
-                                    className="w-fit hover:bg-secondary"
-                                  >
-                                    <ShinyText
-                                      text="Brainstorming.."
-                                      speed={3}
-                                    />
-                                  </Button>
-                                );
-                              }
-                              // Only show one brainstorming button, skip others
-                              return null;
-                            });
-                          })()}
+                          {parts.map((part, i) => {
+                            if (isTextPart(part)) {
+                              return (
+                                <Response key={`${message.id}-${i}`}>
+                                  {part.text}
+                                </Response>
+                              );
+                            }
+                            if (
+                              isReasoningPart(part) &&
+                              status === "streaming"
+                            ) {
+                              return (
+                                <Button
+                                  variant={"secondary"}
+                                  className="w-fit hover:bg-secondary"
+                                >
+                                  <ShinyText text="Brainstorming.." speed={3} />
+                                </Button>
+                              );
+                            }
+                            return null;
+                          })}
                         </MessageContent>
                       </Message>
                     </div>
@@ -2132,17 +2085,12 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                {(status === "submitted" || isPasting) && !generationError && (
+                {status === "submitted" && !generationError && (
                   <div className="flex justify-center py-4 text-muted-foreground animate-in fade-in duration-300">
                     <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
                       <Loader />
-                      {isPasting ? (
-                        <span className="text-sm font-medium">
-                          ✨ Pasting workflow to n8n...
-                        </span>
-                      ) : (
-                        <span className="text-sm font-medium">Thinking...</span>
-                      )}
+
+                      <span className="text-sm font-medium">Thinking...</span>
                     </div>
                   </div>
                 )}
