@@ -56,8 +56,6 @@ type SourceUrlPart = { type: "source-url"; url: string };
 type TextPart = { type: "text"; text: string };
 type ReasoningPart = { type: "reasoning"; text: string };
 
-type WorkflowJsonMessage = { type: "WORKFLOW_JSON"; json: string };
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -69,9 +67,6 @@ const isTextPart = (part: unknown): part is TextPart =>
 
 const isReasoningPart = (part: unknown): part is ReasoningPart =>
   isRecord(part) && part.type === "reasoning" && typeof part.text === "string";
-
-const isWorkflowJsonMessage = (msg: unknown): msg is WorkflowJsonMessage =>
-  isRecord(msg) && msg.type === "WORKFLOW_JSON" && typeof msg.json === "string";
 
 // Extract JSON block from assistant text (```json ... ``` or first {...} block)
 const extractJsonFromText = (text: string): string | null => {
@@ -111,6 +106,7 @@ export default function App() {
     { name: "Gemini 2.0 Flash", value: "google/gemini-2.0-flash-001" },
     { name: "Deepseek R1", value: "deepseek/deepseek-r1" },
     { name: "Grok Code Fast 1", value: "x-ai/grok-code-fast-1" },
+    { name: "OpenAI GPT-5", value: "openai/gpt-5" },
   ];
 
   // Local chat UI state
@@ -121,22 +117,9 @@ export default function App() {
   const [webSearch, setWebSearch] = useState<boolean>(false);
   const [isPasting, setIsPasting] = useState<boolean>(false);
   const [generations, setGenerations] = useState<number>(0);
-  const [pendingPaste, setPendingPaste] = useState<{
-    json: string;
-    toolCallId?: string;
-  } | null>(null);
   const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
-  const [workflowJson, setWorkflowJson] = useState<string | null>(null);
-  const [sendingWorkflowJson, setSendingWorkflowJson] =
-    useState<boolean>(false);
-  const [toolCallId, setToolCallId] = useState<string | null>(null);
-  // Keep a ref in sync to avoid stale closures inside handlers
-  const workflowJsonRef = useRef<string | null>(null);
-  useEffect(() => {
-    workflowJsonRef.current = workflowJson;
-  }, [workflowJson]);
 
   const signOut = async () => {
     const { error } = await authClient.signOut();
@@ -144,19 +127,6 @@ export default function App() {
       console.error(error);
     }
   };
-
-  // Receive workflow JSON from content script and store + log it
-  useEffect(() => {
-    const onMessage = (message: unknown) => {
-      if (isWorkflowJsonMessage(message)) {
-        setWorkflowJson(message.json);
-        // eslint-disable-next-line no-console
-        console.log("[n8n-gpt] Workflow JSON from page:\n", message.json);
-      }
-    };
-    browser.runtime.onMessage.addListener(onMessage);
-    return () => browser.runtime.onMessage.removeListener(onMessage);
-  }, []);
 
   // Listen for OAuth callback from background script
   useEffect(() => {
@@ -221,102 +191,6 @@ export default function App() {
     };
   }, []);
 
-  // Clear any pending paste when leaving n8n
-  useEffect(() => {
-    if (!isOnN8n && pendingPaste) setPendingPaste(null);
-  }, [isOnN8n, pendingPaste]);
-
-  /**
-   * Click the in-page floating button with id "n8n-gpt-send-btn" to trigger
-   * the content script's capture of the current workflow JSON.
-   */
-  const clickSendButtonOnPage = async (): Promise<void> => {
-    const [tab] = await browser.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    const tabId = typeof tab?.id === "number" ? tab.id : null;
-    const tabUrl = typeof tab?.url === "string" ? tab.url : "";
-
-    if (tabId === null || tabUrl.length === 0) {
-      throw new Error("No active tab found");
-    }
-
-    if (!isN8nInstance(tabUrl)) {
-      throw new Error(
-        "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
-      );
-    }
-
-    const url = new URL(tabUrl);
-    try {
-      const hostPermissions = createN8nHostPermissions(url.hostname);
-      const hasPermission = await browser.permissions.contains({
-        origins: hostPermissions,
-      });
-      if (!hasPermission) {
-        try {
-          await browser.permissions.request({ origins: hostPermissions });
-        } catch {}
-      }
-    } catch {}
-
-    // First try the message-based capture (runs within content-script context)
-    try {
-      const response = await browser.tabs.sendMessage(tabId, {
-        type: "CAPTURE_WORKFLOW_JSON",
-      } as const);
-      if (response && response.success === true) {
-        return;
-      }
-    } catch {
-      // tabs.sendMessage can fail if the content script isn't injected yet
-    }
-
-    // Fallback: click the floating button directly in the page
-    const result = await browser.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: () => {
-        try {
-          const btn = document.getElementById("n8n-gpt-send-btn");
-          if (!btn) {
-            throw new Error("n8n-gpt-send-btn not found on page");
-          }
-          const el = btn as HTMLButtonElement;
-          el.dispatchEvent(
-            new MouseEvent("mousedown", { bubbles: true, cancelable: true })
-          );
-          el.dispatchEvent(
-            new MouseEvent("mouseup", { bubbles: true, cancelable: true })
-          );
-          el.dispatchEvent(
-            new MouseEvent("click", { bubbles: true, cancelable: true })
-          );
-
-          return { success: true } as const;
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error";
-          return { success: false, message } as const;
-        }
-      },
-    });
-
-    const scriptResult = result[0]?.result as
-      | { success: true }
-      | { success: false; message: string }
-      | undefined;
-
-    if (!scriptResult || scriptResult.success !== true) {
-      throw new Error(
-        (scriptResult && "message" in scriptResult
-          ? scriptResult.message
-          : null) || "Failed to click send button"
-      );
-    }
-  };
-
   // AI chat hook (expects a backend handler; UI will still render without one)
   const {
     messages,
@@ -359,73 +233,272 @@ export default function App() {
       }
     },
     onToolCall: async ({ toolCall }) => {
-      if (toolCall.toolName === "paste_json_in_n8n") {
-        if (!isOnN8n) {
-          addToolResult({
-            tool: "paste_json_in_n8n",
-            toolCallId: toolCall.toolCallId,
-            output: `Not on an n8n tab. Open an n8n workflow page to paste.`,
-          });
-          return;
-        }
+      if (toolCall.toolName === "modify_workflow") {
         try {
-          let content: string;
+          let modifications: unknown;
           if (
             typeof toolCall.input === "object" &&
-            toolCall.input &&
-            "json" in toolCall.input
+            toolCall.input !== null &&
+            "modifications" in (toolCall.input as Record<string, unknown>)
           ) {
-            content = (toolCall.input as { json: string }).json;
+            modifications = (toolCall.input as { modifications: unknown })
+              .modifications;
           } else if (typeof toolCall.input === "string") {
-            content = toolCall.input;
+            try {
+              modifications = JSON.parse(toolCall.input);
+            } catch {
+              throw new Error("Invalid JSON string for modifications");
+            }
           } else {
-            throw new Error("Invalid tool call input format");
+            throw new Error("Invalid tool call input format for modifications");
           }
-          setPendingPaste({ json: content, toolCallId: toolCall.toolCallId });
+
+          const applied = await applyWorkflowModifications(modifications);
+          if (applied) {
+            const json = await fetchCurrentWorkflow();
+            addToolResult({
+              tool: "modify_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: "Workflow modified successfully. New workflow: " + json,
+            });
+          } else {
+            addToolResult({
+              tool: "modify_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: "Failed to modify workflow",
+            });
+          }
         } catch (error) {
-          const errorMessage =
+          const message =
             error instanceof Error ? error.message : "Unknown error occurred";
           addToolResult({
-            tool: "paste_json_in_n8n",
+            tool: "modify_workflow",
             toolCallId: toolCall.toolCallId,
-            output: `Error preparing paste: ${errorMessage}`,
+            output: `Failed to modify workflow: ${message}`,
           });
         }
+        return;
+      }
+
+      if (toolCall.toolName === "write_workflow") {
+        try {
+          let workflowJsonString: string;
+          if (typeof toolCall.input === "object" && toolCall.input !== null) {
+            const obj = toolCall.input as Record<string, unknown>;
+            const candidate =
+              (typeof obj["workflowJson"] === "string"
+                ? (obj["workflowJson"] as string)
+                : undefined) ||
+              (typeof obj["json"] === "string"
+                ? (obj["json"] as string)
+                : undefined) ||
+              (typeof obj["workflow"] === "string"
+                ? (obj["workflow"] as string)
+                : undefined);
+            if (typeof candidate !== "string") {
+              // If a non-string object is provided, attempt to stringify it
+              if (
+                typeof obj["workflow"] === "object" &&
+                obj["workflow"] !== null
+              ) {
+                try {
+                  workflowJsonString = JSON.stringify(obj["workflow"]);
+                } catch {
+                  throw new Error(
+                    "Invalid tool call input format: expected JSON string under 'workflowJson' | 'json' | 'workflow'"
+                  );
+                }
+              } else {
+                throw new Error(
+                  "Invalid tool call input format: expected JSON string under 'workflowJson' | 'json' | 'workflow'"
+                );
+              }
+            } else {
+              workflowJsonString = candidate;
+            }
+          } else if (typeof toolCall.input === "string") {
+            workflowJsonString = toolCall.input;
+          } else {
+            throw new Error(
+              "Invalid tool call input format for write_workflow; expected JSON string"
+            );
+          }
+
+          const applied = await writeWorkflowFromJson(workflowJsonString);
+          if (applied) {
+            const json = await fetchCurrentWorkflow();
+            addToolResult({
+              tool: "write_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: "Workflow written successfully. New workflow: " + json,
+            });
+          } else {
+            addToolResult({
+              tool: "write_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: "Failed to write workflow",
+            });
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error occurred";
+          addToolResult({
+            tool: "write_workflow",
+            toolCallId: toolCall.toolCallId,
+            output: `Failed to write workflow: ${message}`,
+          });
+        }
+        return;
       }
 
       if (toolCall.toolName === "get_current_workflow") {
-        // Before reading from the ref, trigger the in-page send button click
-        // so the content script captures the latest workflow JSON from n8n.
-        // if (!isOnN8n) {
-        //   addToolResult({
-        //     tool: "get_current_workflow",
-        //     toolCallId: toolCall.toolCallId,
-        //     output: "Not on an n8n tab. Open an n8n workflow page to fetch.",
-        //   });
-        //   return;
-        // }
-
-        const previousWorkflow = workflowJsonRef.current;
         try {
-          await clickSendButtonOnPage();
-          // const updatedWorkflow = await waitForWorkflowJsonUpdate(
-          //   previousWorkflow,
-          //   2000
-          // );
-          // const output =
-          //   updatedWorkflow ?? previousWorkflow ?? "No workflow found";
-          addToolResult({
-            tool: "get_current_workflow",
-            toolCallId: toolCall.toolCallId,
-            output: previousWorkflow ?? "No workflow found",
-          });
+          const json = await fetchCurrentWorkflow();
+          if (typeof json === "string" && json.length > 0) {
+            addToolResult({
+              tool: "get_current_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: json,
+            });
+          } else {
+            addToolResult({
+              tool: "get_current_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: "No workflow found",
+            });
+          }
         } catch (error) {
           const message =
             error instanceof Error ? error.message : "Unknown error occurred";
           addToolResult({
             tool: "get_current_workflow",
             toolCallId: toolCall.toolCallId,
-            output: `Failed to click or retrieve workflow: ${message}`,
+            output: `Failed to retrieve workflow: ${message}`,
+          });
+        }
+        return;
+      }
+
+      if (toolCall.toolName === "delete_workflow") {
+        try {
+          const applied = await deleteCurrentWorkflowOnPage();
+          if (applied) {
+            const json = await fetchCurrentWorkflow();
+            addToolResult({
+              tool: "delete_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: "Workflow deleted/cleared successfully.",
+            });
+          } else {
+            addToolResult({
+              tool: "delete_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: "Failed to delete workflow",
+            });
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error occurred";
+          addToolResult({
+            tool: "delete_workflow",
+            toolCallId: toolCall.toolCallId,
+            output: `Failed to delete workflow: ${message}`,
+          });
+        }
+        return;
+      }
+
+      if (toolCall.toolName === "add_node") {
+        try {
+          let nodeType = "";
+          let nodeName = "";
+          let parameters: Record<string, unknown> = {};
+          let position: [number, number] = [0, 0];
+          if (typeof toolCall.input === "object" && toolCall.input !== null) {
+            const obj = toolCall.input as Record<string, unknown>;
+            nodeType = String(obj["nodeType"] ?? "");
+            nodeName = String(obj["nodeName"] ?? "");
+            parameters = (obj["parameters"] as Record<string, unknown>) ?? {};
+            const pos = obj["position"] as unknown;
+            if (
+              Array.isArray(pos) &&
+              pos.length === 2 &&
+              typeof pos[0] === "number" &&
+              typeof pos[1] === "number"
+            ) {
+              position = [pos[0], pos[1]];
+            }
+          } else {
+            throw new Error("Invalid input for add_node");
+          }
+
+          const addedId = await addNodeOnPage({
+            nodeType,
+            nodeName,
+            parameters,
+            position,
+          });
+          if (typeof addedId === "string" && addedId.length > 0) {
+            const json = await fetchCurrentWorkflow();
+            addToolResult({
+              tool: "add_node",
+              toolCallId: toolCall.toolCallId,
+              output: `Node added successfully with id ${addedId}`,
+            });
+          } else {
+            addToolResult({
+              tool: "add_node",
+              toolCallId: toolCall.toolCallId,
+              output: "Failed to add node",
+            });
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error occurred";
+          addToolResult({
+            tool: "add_node",
+            toolCallId: toolCall.toolCallId,
+            output: `Failed to add node: ${message}`,
+          });
+        }
+        return;
+      }
+
+      if (toolCall.toolName === "delete_node") {
+        try {
+          if (
+            typeof toolCall.input !== "object" ||
+            toolCall.input === null ||
+            typeof (toolCall.input as Record<string, unknown>)["nodeId"] !==
+              "string"
+          ) {
+            throw new Error("Invalid input for delete_node; expected nodeId");
+          }
+          const nodeId = String(
+            (toolCall.input as Record<string, unknown>)["nodeId"]
+          );
+          const ok = await deleteNodeOnPage({ nodeId });
+          if (ok) {
+            const json = await fetchCurrentWorkflow();
+            addToolResult({
+              tool: "delete_node",
+              toolCallId: toolCall.toolCallId,
+              output: `Node ${nodeId} deleted successfully`,
+            });
+          } else {
+            addToolResult({
+              tool: "delete_node",
+              toolCallId: toolCall.toolCallId,
+              output: "Failed to delete node",
+            });
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error occurred";
+          addToolResult({
+            tool: "delete_node",
+            toolCallId: toolCall.toolCallId,
+            output: `Failed to delete node: ${message}`,
           });
         }
         return;
@@ -436,7 +509,7 @@ export default function App() {
   // When assistant finishes a response, try to extract JSON from it and prompt immediately
   useEffect(() => {
     if (!isOnN8n) return;
-    if (status === "streaming" || pendingPaste !== null) return;
+    if (status === "streaming") return;
     if (messages.length === 0) return;
     const last = messages[messages.length - 1] as unknown as {
       role?: string;
@@ -453,10 +526,9 @@ export default function App() {
     if (!text) return;
     const json = extractJsonFromText(text);
     if (json) {
-      setPendingPaste({ json });
       lastAutoPromptedMessageId.current = last.id;
     }
-  }, [messages, status, pendingPaste, isOnN8n]);
+  }, [messages, status, isOnN8n]);
 
   useEffect(() => {
     const getGenerations = async () => {
@@ -468,50 +540,6 @@ export default function App() {
     };
     getGenerations();
   }, [session, messages]);
-
-  console.log("workflowJson6969", workflowJson);
-
-  const handleConfirmPaste = async (): Promise<void> => {
-    if (!pendingPaste || !isOnN8n) return;
-    setIsPasting(true);
-    try {
-      const success = await pasteContent({ content: pendingPaste.json });
-      if (pendingPaste.toolCallId) {
-        addToolResult({
-          tool: "paste_json_in_n8n",
-          toolCallId: pendingPaste.toolCallId,
-          output: success
-            ? `Workflow successfully pasted into n8n canvas`
-            : `Failed to paste workflow - please make sure you're on an n8n page`,
-        });
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      if (pendingPaste.toolCallId) {
-        addToolResult({
-          tool: "paste_json_in_n8n",
-          toolCallId: pendingPaste.toolCallId,
-          output: `Error pasting workflow: ${errorMessage}`,
-        });
-      }
-    } finally {
-      setIsPasting(false);
-      setPendingPaste(null);
-    }
-  };
-
-  const handleCancelPaste = (): void => {
-    if (!pendingPaste) return;
-    if (pendingPaste.toolCallId) {
-      addToolResult({
-        tool: "paste_json_in_n8n",
-        toolCallId: pendingPaste.toolCallId,
-        output: `Paste cancelled by user`,
-      });
-    }
-    setPendingPaste(null);
-  };
 
   /**
    * Handle prompt submission. Prevent default form post and dispatch to useChat.
@@ -567,6 +595,1195 @@ export default function App() {
 
     setInput("");
   };
+
+  /**
+   * Apply workflow modifications in the active n8n tab. Accepts a generic object
+   * with optional keys: nodes (array), connections (object), updateNode (object).
+   */
+  const applyWorkflowModifications = async (
+    modifications: unknown
+  ): Promise<boolean> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+
+      const url = new URL(tabUrl);
+
+      // Best-effort host permissions request (non-blocking)
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (mods: any) => {
+          try {
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements) as any[]) {
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              if (vueInstance?.appContext) {
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                const workflowsStore = globals?.$pinia?._s?.get
+                  ? globals.$pinia._s.get("workflows")
+                  : globals?.$pinia?._s?.["workflows"];
+                const vueFlowStorage = (globals as any)?.$vueFlowStorage as
+                  | {
+                      flows?: Map<
+                        string,
+                        {
+                          nodes: { value: Array<any> };
+                          edges: { value: Array<any> };
+                        }
+                      >;
+                    }
+                  | undefined;
+
+                const currentWorkflow = (workflowsStore as any)?.workflow as
+                  | {
+                      nodes?: Array<any>;
+                      connections?: Record<string, any>;
+                    }
+                  | undefined;
+                if (!currentWorkflow || !Array.isArray(currentWorkflow.nodes)) {
+                  continue;
+                }
+
+                // Do NOT add nodes here; modify_workflow only updates existing items
+
+                // Track if connections changed
+                let connectionsChanged = false;
+
+                // Merge connections if provided
+                if (
+                  mods &&
+                  mods.connections &&
+                  typeof mods.connections === "object"
+                ) {
+                  currentWorkflow.connections = {
+                    ...(currentWorkflow.connections ?? {}),
+                    ...(mods.connections as Record<string, unknown>),
+                  } as Record<string, any>;
+                  connectionsChanged = true;
+                }
+
+                // Update an existing node's parameters (preserve connections)
+                if (
+                  mods &&
+                  mods.updateNode &&
+                  typeof mods.updateNode === "object"
+                ) {
+                  const id = (mods.updateNode as { id?: string }).id;
+                  if (typeof id === "string" && id.length > 0) {
+                    const idx = currentWorkflow.nodes.findIndex(
+                      (n: any) => n && n.id === id
+                    );
+                    if (idx !== -1) {
+                      const candidate = mods.updateNode as Record<string, any>;
+                      const oldName = (currentWorkflow.nodes[idx] as any)
+                        .name as string | undefined;
+                      const newName =
+                        typeof candidate.name === "string" &&
+                        candidate.name.length > 0
+                          ? (candidate.name as string)
+                          : undefined;
+                      const hadNameUpdate =
+                        typeof oldName === "string" &&
+                        typeof newName === "string" &&
+                        oldName !== newName;
+                      // Only merge parameters to avoid clobbering other fields
+                      if (
+                        candidate.parameters &&
+                        typeof candidate.parameters === "object"
+                      ) {
+                        const existingParams = (
+                          currentWorkflow.nodes[idx] as any
+                        ).parameters;
+                        if (
+                          existingParams &&
+                          typeof existingParams === "object"
+                        ) {
+                          Object.assign(existingParams, candidate.parameters);
+                        } else {
+                          (currentWorkflow.nodes[idx] as any).parameters = {
+                            ...(candidate.parameters as Record<
+                              string,
+                              unknown
+                            >),
+                          };
+                        }
+                      }
+
+                      // Optionally merge a few safe top-level fields
+                      const safeTopLevel: Array<string> = [
+                        "name",
+                        "typeVersion",
+                        "disabled",
+                      ];
+                      for (const key of safeTopLevel) {
+                        if (key in candidate) {
+                          (currentWorkflow.nodes[idx] as any)[key] =
+                            candidate[key];
+                        }
+                      }
+
+                      // Update Vue Flow node data.parameters to keep UI in sync
+                      const flow = vueFlowStorage?.flows?.get("__EMPTY__");
+                      if (flow && Array.isArray(flow.nodes?.value)) {
+                        const vfIdx = flow.nodes.value.findIndex(
+                          (n: any) => n && n.id === id
+                        );
+                        if (vfIdx !== -1) {
+                          const vfData = flow.nodes.value[vfIdx]?.data as
+                            | {
+                                parameters?: Record<string, unknown>;
+                                name?: string;
+                              }
+                            | undefined;
+                          if (
+                            vfData &&
+                            typeof vfData === "object" &&
+                            vfData.parameters &&
+                            typeof vfData.parameters === "object" &&
+                            (mods.updateNode as any).parameters &&
+                            typeof (mods.updateNode as any).parameters ===
+                              "object"
+                          ) {
+                            Object.assign(
+                              vfData.parameters,
+                              (mods.updateNode as any).parameters
+                            );
+                          }
+                          // If name changed, update label and data.name
+                          if (hadNameUpdate && typeof newName === "string") {
+                            (flow.nodes.value[vfIdx] as any).label = newName;
+                            if (vfData && typeof vfData === "object") {
+                              (vfData as any).name = newName;
+                            }
+                          }
+                        }
+                      }
+
+                      // Auto-update connection references and keys when node name changes (unless disabled)
+                      if (
+                        hadNameUpdate &&
+                        !((mods as any).autoUpdateConnections === false)
+                      ) {
+                        const nextConnections: Record<string, any> = {
+                          ...(currentWorkflow.connections ?? {}),
+                        };
+
+                        if (
+                          Object.prototype.hasOwnProperty.call(
+                            nextConnections,
+                            oldName as string
+                          )
+                        ) {
+                          nextConnections[newName as string] =
+                            nextConnections[oldName as string];
+                          delete nextConnections[oldName as string];
+                        }
+
+                        for (const key of Object.keys(nextConnections)) {
+                          const nodeConnections = nextConnections[key] as
+                            | Record<string, any>
+                            | undefined;
+                          if (
+                            !nodeConnections ||
+                            typeof nodeConnections !== "object"
+                          )
+                            continue;
+                          for (const outputType of Object.keys(
+                            nodeConnections
+                          )) {
+                            const arr = nodeConnections[outputType];
+                            if (!Array.isArray(arr)) continue;
+                            arr.forEach((connectionArray: any[]) => {
+                              if (!Array.isArray(connectionArray)) return;
+                              connectionArray.forEach(
+                                (connection: Record<string, any>) => {
+                                  if (
+                                    connection &&
+                                    connection.node === oldName
+                                  ) {
+                                    connection.node = newName;
+                                  }
+                                }
+                              );
+                            });
+                          }
+                        }
+
+                        currentWorkflow.connections = nextConnections;
+                        connectionsChanged = true;
+                      }
+                    }
+                  }
+                }
+
+                // If connections changed, rebuild Vue Flow edges
+                if (connectionsChanged) {
+                  const flow = vueFlowStorage?.flows?.get("__EMPTY__");
+                  if (flow) {
+                    const vueFlowEdges: Array<Record<string, unknown>> = [];
+                    const wfNodes = Array.isArray(currentWorkflow.nodes)
+                      ? (currentWorkflow.nodes as Array<Record<string, any>>)
+                      : [];
+                    const connections = (currentWorkflow.connections ??
+                      {}) as Record<string, any>;
+                    for (const sourceNodeName of Object.keys(connections)) {
+                      const sourceConnections = connections[sourceNodeName] as
+                        | Record<string, Array<Array<Record<string, any>>>>
+                        | undefined;
+                      if (!sourceConnections) continue;
+                      for (const outputType of Object.keys(sourceConnections)) {
+                        const arr = sourceConnections[outputType];
+                        if (!Array.isArray(arr)) continue;
+                        arr.forEach((connectionArray, arrayIndex) => {
+                          if (!Array.isArray(connectionArray)) return;
+                          connectionArray.forEach((connection) => {
+                            const sourceNode = wfNodes.find(
+                              (n) => String(n["name"]) === sourceNodeName
+                            );
+                            const targetNodeName = String(
+                              connection["node"] ?? ""
+                            );
+                            const targetNode = wfNodes.find(
+                              (n) => String(n["name"]) === targetNodeName
+                            );
+                            if (sourceNode && targetNode) {
+                              const srcId = String(sourceNode["id"] ?? "");
+                              const tgtId = String(targetNode["id"] ?? "");
+                              const connType = String(
+                                connection["type"] ?? "main"
+                              );
+                              const connIndex = Number(
+                                connection["index"] ?? 0
+                              );
+                              vueFlowEdges.push({
+                                id: `${srcId}-${tgtId}-${Date.now()}`,
+                                source: srcId,
+                                target: tgtId,
+                                sourceHandle: `outputs/${outputType}/${arrayIndex}`,
+                                targetHandle: `inputs/${connType}/${connIndex}`,
+                              });
+                            }
+                          });
+                        });
+                      }
+                    }
+
+                    flow.edges.value.splice(
+                      0,
+                      flow.edges.value.length,
+                      ...vueFlowEdges
+                    );
+                  }
+                }
+
+                // Trigger reactivity update
+                if (typeof (workflowsStore as any)?.$patch === "function") {
+                  (workflowsStore as any).$patch({
+                    workflow: currentWorkflow,
+                  });
+                } else {
+                  (workflowsStore as any).workflow = currentWorkflow;
+                }
+
+                return {
+                  success: true,
+                  message: "Workflow modified successfully",
+                };
+              }
+            }
+            return {
+              success: false,
+              message: "Could not access Vue app context",
+            };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "Unknown error";
+            return { success: false, message: msg };
+          }
+        },
+        args: [modifications],
+      });
+
+      const scriptResult = result?.[0]?.result as
+        | { success: boolean; message: string }
+        | undefined;
+      if (!scriptResult?.success) {
+        throw new Error(scriptResult?.message || "Script execution failed");
+      }
+      return true;
+    } catch (err) {
+      console.error("Modify workflow error:", err);
+      return false;
+    }
+  };
+
+  // overwriteCurrentWorkflow removed
+
+  /**
+   * Execute a script in the active n8n tab to extract the current workflow
+   * in a simplified export format. Returns a JSON string or null if not found.
+   */
+  const fetchCurrentWorkflow = async (): Promise<string | null> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+
+      const url = new URL(tabUrl);
+
+      // Best-effort host permissions request (non-blocking)
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () => {
+          try {
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements)) {
+              // Access Vue component instance from DOM element
+              // @ts-ignore - accessing non-standard Vue internals on DOM element
+              // Use 'any' for el to access Vue internals without TypeScript errors
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              // @ts-ignore - vue internals may be undefined
+              if (vueInstance?.appContext) {
+                // @ts-ignore - globalProperties is not typed here
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                // @ts-ignore - pinia internals used to locate the workflows store
+                const workflowsStore = globals?.$pinia?._s?.get("workflows");
+                // @ts-ignore - get workflow object from store
+                const fullWorkflow = workflowsStore?.workflow;
+
+                if (!fullWorkflow) {
+                  continue;
+                }
+
+                const nodesArray = Array.isArray(fullWorkflow.nodes)
+                  ? fullWorkflow.nodes
+                  : [];
+
+                // Build simplified export format
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const exportNodes = nodesArray.map((node: any) => {
+                  const exportNode: {
+                    parameters: object;
+                    type: string;
+                    typeVersion: number;
+                    position: [number, number];
+                    id: string;
+                    name: string;
+                    webhookId?: string;
+                  } = {
+                    parameters: (node && node.parameters) || {},
+                    type: (node && node.type) || "",
+                    typeVersion: (node && node.typeVersion) || 1,
+                    position: (node && node.position) || [0, 0],
+                    id: (node && node.id) || "",
+                    name: (node && node.name) || "",
+                  };
+                  if (node && node.webhookId) {
+                    exportNode.webhookId = node.webhookId as string;
+                  }
+                  return exportNode;
+                });
+
+                const exportFormat = {
+                  nodes: exportNodes,
+                  // Use fallbacks to plain objects if missing
+                  connections: (fullWorkflow && fullWorkflow.connections) || {},
+                  pinData: (fullWorkflow && fullWorkflow.pinData) || {},
+                  meta: {
+                    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+                    instanceId:
+                      (fullWorkflow &&
+                        fullWorkflow.meta &&
+                        fullWorkflow.meta.instanceId) ||
+                      null,
+                    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+                    ...(fullWorkflow &&
+                    fullWorkflow.meta &&
+                    fullWorkflow.meta.templateCredsSetupCompleted
+                      ? { templateCredsSetupCompleted: true }
+                      : {}),
+                  },
+                };
+
+                return JSON.stringify(exportFormat);
+              }
+            }
+            return null;
+          } catch {
+            return null;
+          }
+        },
+      });
+
+      const workflowJsonString =
+        typeof results?.[0]?.result === "string" ? results[0].result : null;
+      return workflowJsonString ?? null;
+    } catch (err) {
+      console.error("Fetch current workflow error:", err);
+      throw err instanceof Error ? err : new Error("Unknown error occurred");
+    }
+  };
+
+  const addNodeOnPage = async ({
+    nodeType,
+    nodeName,
+    parameters,
+    position,
+  }: {
+    nodeType: string;
+    nodeName: string;
+    parameters: Record<string, unknown>;
+    position: [number, number];
+  }): Promise<string | false> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+      const url = new URL(tabUrl);
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (payload: {
+          nodeType: string;
+          nodeName: string;
+          parameters: Record<string, unknown>;
+          position: [number, number];
+        }) => {
+          try {
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements) as any[]) {
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              if (vueInstance?.appContext) {
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                const workflowsStore = globals?.$pinia?._s?.get
+                  ? globals.$pinia._s.get("workflows")
+                  : globals?.$pinia?._s?.["workflows"];
+                const vueFlowStorage = (globals as any)?.$vueFlowStorage as
+                  | {
+                      flows?: Map<
+                        string,
+                        {
+                          nodes: { value: Array<any> };
+                          edges: { value: Array<any> };
+                        }
+                      >;
+                    }
+                  | undefined;
+                const currentWorkflow = (workflowsStore as any)?.workflow as
+                  | { nodes?: Array<any> }
+                  | undefined;
+                if (!currentWorkflow || !Array.isArray(currentWorkflow.nodes)) {
+                  continue;
+                }
+
+                const getNodeTypeVersion = (type: string): number => {
+                  const versions: Record<string, number> = {
+                    "n8n-nodes-base.manualTrigger": 1,
+                    "n8n-nodes-base.httpRequest": 4.2,
+                    "n8n-nodes-base.set": 3.4,
+                    "n8n-nodes-base.stickyNote": 1,
+                    "@n8n/n8n-nodes-langchain.agent": 1.8,
+                    "@n8n/n8n-nodes-langchain.chatTrigger": 1.1,
+                  };
+                  return typeof versions[type] === "number"
+                    ? versions[type]
+                    : 1;
+                };
+
+                const newNodeId = `node-${Date.now()}-${Math.random()
+                  .toString(36)
+                  .slice(2, 11)}`;
+                const newNode = {
+                  parameters: payload.parameters ?? {},
+                  type: payload.nodeType,
+                  typeVersion: getNodeTypeVersion(payload.nodeType),
+                  position: payload.position,
+                  id: newNodeId,
+                  name: payload.nodeName,
+                  disabled: false,
+                } as Record<string, unknown>;
+
+                currentWorkflow.nodes.push(newNode);
+
+                const flow = vueFlowStorage?.flows?.get("__EMPTY__");
+                if (flow) {
+                  const vueFlowNode = {
+                    id: newNodeId,
+                    type: "canvas-node",
+                    position: {
+                      x: Number(payload.position?.[0] ?? 0),
+                      y: Number(payload.position?.[1] ?? 0),
+                    },
+                    data: newNode,
+                    label: payload.nodeName,
+                  } as Record<string, unknown>;
+                  flow.nodes.value.push(vueFlowNode);
+                }
+
+                if (typeof (workflowsStore as any).$patch === "function") {
+                  (workflowsStore as any).$patch({ workflow: currentWorkflow });
+                } else {
+                  (workflowsStore as any).workflow = currentWorkflow;
+                }
+
+                return { success: true, nodeId: newNodeId };
+              }
+            }
+            return { success: false, nodeId: null };
+          } catch (e) {
+            return { success: false, nodeId: null };
+          }
+        },
+        args: [
+          {
+            nodeType,
+            nodeName,
+            parameters,
+            position,
+          },
+        ],
+      });
+
+      const scriptResult = result?.[0]?.result as
+        | { success: boolean; nodeId: string | null }
+        | undefined;
+      if (!scriptResult?.success || typeof scriptResult.nodeId !== "string") {
+        return false;
+      }
+      return scriptResult.nodeId;
+    } catch (err) {
+      console.error("Add node error:", err);
+      return false;
+    }
+  };
+
+  const deleteNodeOnPage = async ({
+    nodeId,
+  }: {
+    nodeId: string;
+  }): Promise<boolean> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+      const url = new URL(tabUrl);
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (payload: { nodeId: string }) => {
+          try {
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements) as any[]) {
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              if (vueInstance?.appContext) {
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                const workflowsStore = globals?.$pinia?._s?.get
+                  ? globals.$pinia._s.get("workflows")
+                  : globals?.$pinia?._s?.["workflows"];
+                const vueFlowStorage = (globals as any)?.$vueFlowStorage as
+                  | {
+                      flows?: Map<
+                        string,
+                        {
+                          nodes: { value: Array<any> };
+                          edges: { value: Array<any> };
+                        }
+                      >;
+                    }
+                  | undefined;
+                const currentWorkflow = (workflowsStore as any)?.workflow as
+                  | { nodes?: Array<any>; connections?: Record<string, any> }
+                  | undefined;
+                if (!currentWorkflow || !Array.isArray(currentWorkflow.nodes)) {
+                  continue;
+                }
+
+                const idx = currentWorkflow.nodes.findIndex(
+                  (n: any) => n && n.id === payload.nodeId
+                );
+                if (idx === -1) {
+                  return { success: false };
+                }
+                const nodeName = String(
+                  (currentWorkflow.nodes[idx] as any)?.name ?? ""
+                );
+
+                currentWorkflow.nodes = currentWorkflow.nodes.filter(
+                  (n: any) => n && n.id !== payload.nodeId
+                );
+
+                const nextConnections: Record<string, any> = {
+                  ...(currentWorkflow.connections ?? {}),
+                };
+                if (
+                  Object.prototype.hasOwnProperty.call(
+                    nextConnections,
+                    nodeName
+                  )
+                ) {
+                  delete nextConnections[nodeName];
+                }
+                for (const sourceNodeName of Object.keys(nextConnections)) {
+                  const sourceConnections = nextConnections[sourceNodeName] as
+                    | Record<string, Array<Array<Record<string, any>>>>
+                    | undefined;
+                  if (!sourceConnections) continue;
+                  for (const outputType of Object.keys(sourceConnections)) {
+                    const arr = sourceConnections[outputType];
+                    if (!Array.isArray(arr)) continue;
+                    const cleaned = arr
+                      .map((connectionArray) =>
+                        Array.isArray(connectionArray)
+                          ? connectionArray.filter(
+                              (connection) =>
+                                connection && connection.node !== nodeName
+                            )
+                          : []
+                      )
+                      .filter(
+                        (connectionArray) =>
+                          Array.isArray(connectionArray) &&
+                          connectionArray.length > 0
+                      );
+                    if (cleaned.length > 0) {
+                      sourceConnections[outputType] = cleaned;
+                    } else {
+                      delete sourceConnections[outputType];
+                    }
+                  }
+                  if (Object.keys(sourceConnections).length === 0) {
+                    delete nextConnections[sourceNodeName];
+                  }
+                }
+                currentWorkflow.connections = nextConnections;
+
+                const flow = vueFlowStorage?.flows?.get("__EMPTY__");
+                if (flow) {
+                  flow.nodes.value = flow.nodes.value.filter(
+                    (n: any) => n && n.id !== payload.nodeId
+                  );
+                  flow.edges.value = flow.edges.value.filter(
+                    (edge: any) =>
+                      edge &&
+                      edge.source !== payload.nodeId &&
+                      edge.target !== payload.nodeId
+                  );
+                }
+
+                if (typeof (workflowsStore as any).$patch === "function") {
+                  (workflowsStore as any).$patch({ workflow: currentWorkflow });
+                } else {
+                  (workflowsStore as any).workflow = currentWorkflow;
+                }
+
+                return { success: true };
+              }
+            }
+            return { success: false };
+          } catch (e) {
+            return { success: false };
+          }
+        },
+        args: [{ nodeId }],
+      });
+
+      const scriptResult = result?.[0]?.result as
+        | { success: boolean }
+        | undefined;
+      if (!scriptResult?.success) {
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error("Delete node error:", err);
+      return false;
+    }
+  };
+
+  /**
+   * Delete/Clear the current workflow on the active n8n tab.
+   */
+  const deleteCurrentWorkflowOnPage = async (): Promise<boolean> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+
+      const url = new URL(tabUrl);
+
+      // Best-effort host permissions request (non-blocking)
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () => {
+          try {
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements) as any[]) {
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              if (vueInstance?.appContext) {
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                const workflowsStore = globals?.$pinia?._s?.get
+                  ? globals.$pinia._s.get("workflows")
+                  : globals?.$pinia?._s?.["workflows"];
+                const vueFlowStorage = (globals as any)?.$vueFlowStorage as
+                  | {
+                      flows?: Map<
+                        string,
+                        {
+                          nodes: { value: Array<any> };
+                          edges: { value: Array<any> };
+                        }
+                      >;
+                    }
+                  | undefined;
+
+                if (!workflowsStore || !vueFlowStorage) {
+                  continue;
+                }
+
+                const emptyWorkflow = {
+                  id: null,
+                  name: "New Workflow",
+                  active: false,
+                  nodes: [] as Array<unknown>,
+                  connections: {} as Record<string, unknown>,
+                  settings: {
+                    executionOrder: "v1",
+                  },
+                  tags: [] as Array<unknown>,
+                  pinData: {} as Record<string, unknown>,
+                  meta: {
+                    instanceId: null as string | null,
+                  },
+                };
+
+                try {
+                  if (typeof (workflowsStore as any).$patch === "function") {
+                    (workflowsStore as any).$patch({ workflow: emptyWorkflow });
+                  } else {
+                    (workflowsStore as any).workflow = emptyWorkflow;
+                  }
+
+                  const flow = vueFlowStorage.flows?.get("__EMPTY__");
+                  if (flow) {
+                    flow.nodes.value.splice(0, flow.nodes.value.length);
+                    flow.edges.value.splice(0, flow.edges.value.length);
+                  }
+
+                  // eslint-disable-next-line no-console
+                  console.log("Workflow deleted/cleared successfully");
+                  return { success: true, message: "ok" };
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : "Unknown error";
+                  return { success: false, message: msg };
+                }
+              }
+            }
+            return { success: false, message: "Vue instance not found" };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "Unknown error";
+            return { success: false, message: msg };
+          }
+        },
+      });
+
+      const scriptResult = result?.[0]?.result as
+        | { success: boolean; message: string }
+        | undefined;
+      if (!scriptResult?.success) {
+        throw new Error(scriptResult?.message || "Script execution failed");
+      }
+      return true;
+    } catch (err) {
+      console.error("Delete workflow error:", err);
+      return false;
+    }
+  };
+
+  /**
+   * Write a workflow to the active n8n tab from a JSON string.
+   * Safely updates the Pinia store and Vue Flow state.
+   */
+  const writeWorkflowFromJson = async (
+    workflowJsonString: string
+  ): Promise<boolean> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+
+      const url = new URL(tabUrl);
+
+      // Best-effort host permissions request (non-blocking)
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (json: string) => {
+          try {
+            const workflow = JSON.parse(json);
+
+            // inner helper similar to updateWorkflowSafely but accepts parsed workflow
+            function applyWorkflow(workflowObj: unknown): boolean {
+              try {
+                const allElements = document.querySelectorAll("*");
+                for (const el of Array.from(allElements)) {
+                  const anyEl = el as unknown as {
+                    __vueParentComponent?: {
+                      appContext?: {
+                        app: {
+                          config: { globalProperties: Record<string, unknown> };
+                        };
+                      };
+                    };
+                    _vnode?: {
+                      component?: {
+                        appContext?: {
+                          app: {
+                            config: {
+                              globalProperties: Record<string, unknown>;
+                            };
+                          };
+                        };
+                      };
+                    };
+                  };
+                  const vueInstance =
+                    anyEl.__vueParentComponent || anyEl._vnode?.component;
+                  if (
+                    vueInstance &&
+                    (vueInstance as { appContext?: unknown }).appContext
+                  ) {
+                    const globals = (
+                      vueInstance as {
+                        appContext: {
+                          app: {
+                            config: {
+                              globalProperties: Record<string, unknown>;
+                            };
+                          };
+                        };
+                      }
+                    ).appContext.app.config.globalProperties;
+                    const pinia = globals?.["$pinia"] as
+                      | { _s?: Map<string, unknown> & Record<string, unknown> }
+                      | undefined;
+                    const workflowsStore =
+                      pinia &&
+                      ((typeof pinia._s?.get === "function"
+                        ? (pinia._s as Map<string, unknown>).get("workflows")
+                        : (pinia._s as Record<string, unknown> | undefined)?.[
+                            "workflows"
+                          ]) as
+                        | {
+                            $patch?: (payload: Record<string, unknown>) => void;
+                            workflow?: unknown;
+                          }
+                        | undefined);
+                    const vueFlowStorage = globals?.["$vueFlowStorage"] as
+                      | {
+                          flows?: Map<
+                            string,
+                            {
+                              nodes: { value: Array<unknown> };
+                              edges: { value: Array<unknown> };
+                            }
+                          >;
+                        }
+                      | undefined;
+
+                    if (!workflowsStore || !vueFlowStorage) {
+                      continue;
+                    }
+
+                    const wfObj = workflowObj as {
+                      nodes?: Array<Record<string, unknown>>;
+                      connections?: Record<string, unknown>;
+                    };
+                    if (!wfObj || !Array.isArray(wfObj.nodes)) {
+                      return false;
+                    }
+
+                    // Update store
+                    if (typeof workflowsStore.$patch === "function") {
+                      workflowsStore.$patch({ workflow: wfObj });
+                    } else {
+                      (workflowsStore as { workflow?: unknown }).workflow =
+                        wfObj;
+                    }
+
+                    // Sync Vue Flow
+                    const flow = vueFlowStorage.flows?.get("__EMPTY__");
+                    if (flow) {
+                      const vueFlowNodes = wfObj.nodes.map((node) => {
+                        const id = String(node["id"] ?? "");
+                        const name = String(node["name"] ?? "");
+                        const posArr = Array.isArray(node["position"])
+                          ? (node["position"] as Array<number>)
+                          : [0, 0];
+                        return {
+                          id,
+                          type: "canvas-node",
+                          position: {
+                            x: Number(posArr[0] ?? 0),
+                            y: Number(posArr[1] ?? 0),
+                          },
+                          data: node,
+                          label: name,
+                        } as Record<string, unknown>;
+                      });
+
+                      const edges: Array<Record<string, unknown>> = [];
+                      const connections = (wfObj.connections ?? {}) as Record<
+                        string,
+                        unknown
+                      >;
+                      for (const sourceName of Object.keys(connections)) {
+                        const sourceConnections = connections[sourceName] as
+                          | Record<
+                              string,
+                              Array<Array<Record<string, unknown>>>
+                            >
+                          | undefined;
+                        if (!sourceConnections) continue;
+                        for (const outputType of Object.keys(
+                          sourceConnections
+                        )) {
+                          const arr = sourceConnections[outputType];
+                          if (!Array.isArray(arr)) continue;
+                          arr.forEach((connectionArray) => {
+                            if (!Array.isArray(connectionArray)) return;
+                            connectionArray.forEach((connection) => {
+                              const src = wfObj.nodes?.find(
+                                (n) => String(n["name"]) === sourceName
+                              );
+                              const tgtName = String(connection["node"] ?? "");
+                              const tgt = wfObj.nodes?.find(
+                                (n) => String(n["name"]) === tgtName
+                              );
+                              if (src && tgt) {
+                                edges.push({
+                                  id: `${String(src["id"] ?? "")}-${String(tgt["id"] ?? "")}`,
+                                  source: String(src["id"] ?? ""),
+                                  target: String(tgt["id"] ?? ""),
+                                });
+                              }
+                            });
+                          });
+                        }
+                      }
+
+                      flow.nodes.value.splice(
+                        0,
+                        flow.nodes.value.length,
+                        ...vueFlowNodes
+                      );
+                      flow.edges.value.splice(
+                        0,
+                        flow.edges.value.length,
+                        ...edges
+                      );
+                    }
+
+                    // eslint-disable-next-line no-console
+                    console.log("Workflow written successfully");
+                    return true;
+                  }
+                }
+                return false;
+              } catch (e) {
+                // eslint-disable-next-line no-console
+                console.error("Error writing workflow:", e);
+                return false;
+              }
+            }
+
+            const ok = applyWorkflow(workflow);
+            return ok
+              ? { success: true, message: "Workflow written successfully" }
+              : { success: false, message: "Failed to write workflow" };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "Unknown error";
+            return { success: false, message: msg };
+          }
+        },
+        args: [workflowJsonString],
+      });
+
+      const scriptResult = result?.[0]?.result as
+        | { success: boolean; message: string }
+        | undefined;
+      if (!scriptResult?.success) {
+        throw new Error(scriptResult?.message || "Script execution failed");
+      }
+      return true;
+    } catch (err) {
+      console.error("Write workflow error:", err);
+      return false;
+    }
+  };
+
+  // Removed duplicate overwriteCurrentWorkflow definition
 
   const pasteContent = async ({
     content,
@@ -872,54 +2089,18 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                {(status === "submitted" || isPasting) && !generationError && (
-                  <div className="ml-4 mt-2 mb-4 animate-in fade-in duration-300">
-                    <div className="flex items-center gap-3 w-fit px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
+                {status === "submitted" && !generationError && (
+                  <div className="flex justify-center py-4 text-muted-foreground animate-in fade-in duration-300">
+                    <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
                       <Loader />
-                      {isPasting ? (
-                        <span className="text-sm font-medium text-muted-foreground">
-                          ✨ Pasting workflow to n8n...
-                        </span>
-                      ) : (
-                        <span className="text-sm font-medium text-muted-foreground">Thinking...</span>
-                      )}
+
+                      <span className="text-sm font-medium">Thinking...</span>
                     </div>
                   </div>
                 )}
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>
-
-            {pendingPaste && (
-              <div className="sticky bottom-0 z-20 bg-card/95 backdrop-blur-sm border-t border-border/30 px-4 py-3 animate-in slide-in-from-bottom-4 duration-300">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 flex-1">
-                    <span className="text-sm font-medium">
-                      Paste workflow into n8n?
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={handleConfirmPaste}
-                      className=" transition-transform duration-200 bg-primary hover:bg-primary/90"
-                    >
-                      Yes
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleCancelPaste}
-                      className=" transition-transform duration-200 border-border/50 hover:border-border"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="sticky bottom-0 z-10 border-t border-border/30 bg-card/80 px-4 pb-4 pt-2 backdrop-blur-sm supports-[backdrop-filter]:bg-card/60">
               <PromptInput
                 onSubmit={handleSubmit}
