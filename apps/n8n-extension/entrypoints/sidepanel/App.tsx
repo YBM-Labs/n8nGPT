@@ -120,6 +120,7 @@ export default function App() {
   const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
+  const [isToolCalling, setIsToolCalling] = useState<boolean>(false);
 
   const signOut = async () => {
     const { error } = await authClient.signOut();
@@ -233,275 +234,282 @@ export default function App() {
       }
     },
     onToolCall: async ({ toolCall }) => {
-      if (toolCall.toolName === "modify_workflow") {
-        try {
-          let modifications: unknown;
-          if (
-            typeof toolCall.input === "object" &&
-            toolCall.input !== null &&
-            "modifications" in (toolCall.input as Record<string, unknown>)
-          ) {
-            modifications = (toolCall.input as { modifications: unknown })
-              .modifications;
-          } else if (typeof toolCall.input === "string") {
-            try {
-              modifications = JSON.parse(toolCall.input);
-            } catch {
-              throw new Error("Invalid JSON string for modifications");
+      setIsToolCalling(true);
+      try {
+        if (toolCall.toolName === "modify_workflow") {
+          try {
+            let modifications: unknown;
+            if (
+              typeof toolCall.input === "object" &&
+              toolCall.input !== null &&
+              "modifications" in (toolCall.input as Record<string, unknown>)
+            ) {
+              modifications = (toolCall.input as { modifications: unknown })
+                .modifications;
+            } else if (typeof toolCall.input === "string") {
+              try {
+                modifications = JSON.parse(toolCall.input);
+              } catch {
+                throw new Error("Invalid JSON string for modifications");
+              }
+            } else {
+              throw new Error(
+                "Invalid tool call input format for modifications"
+              );
             }
-          } else {
-            throw new Error("Invalid tool call input format for modifications");
-          }
 
-          const applied = await applyWorkflowModifications(modifications);
-          if (applied) {
-            const json = await fetchCurrentWorkflow();
+            const applied = await applyWorkflowModifications(modifications);
+            if (applied) {
+              const json = await fetchCurrentWorkflow();
+              addToolResult({
+                tool: "modify_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: "Workflow modified successfully. New workflow: " + json,
+              });
+            } else {
+              addToolResult({
+                tool: "modify_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: "Failed to modify workflow",
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
             addToolResult({
               tool: "modify_workflow",
               toolCallId: toolCall.toolCallId,
-              output: "Workflow modified successfully. New workflow: " + json,
-            });
-          } else {
-            addToolResult({
-              tool: "modify_workflow",
-              toolCallId: toolCall.toolCallId,
-              output: "Failed to modify workflow",
+              output: `Failed to modify workflow: ${message}`,
             });
           }
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error occurred";
-          addToolResult({
-            tool: "modify_workflow",
-            toolCallId: toolCall.toolCallId,
-            output: `Failed to modify workflow: ${message}`,
-          });
+          return;
         }
-        return;
-      }
 
-      if (toolCall.toolName === "write_workflow") {
-        try {
-          let workflowJsonString: string;
-          if (typeof toolCall.input === "object" && toolCall.input !== null) {
-            const obj = toolCall.input as Record<string, unknown>;
-            const candidate =
-              (typeof obj["workflowJson"] === "string"
-                ? (obj["workflowJson"] as string)
-                : undefined) ||
-              (typeof obj["json"] === "string"
-                ? (obj["json"] as string)
-                : undefined) ||
-              (typeof obj["workflow"] === "string"
-                ? (obj["workflow"] as string)
-                : undefined);
-            if (typeof candidate !== "string") {
-              // If a non-string object is provided, attempt to stringify it
-              if (
-                typeof obj["workflow"] === "object" &&
-                obj["workflow"] !== null
-              ) {
-                try {
-                  workflowJsonString = JSON.stringify(obj["workflow"]);
-                } catch {
+        if (toolCall.toolName === "write_workflow") {
+          try {
+            let workflowJsonString: string;
+            if (typeof toolCall.input === "object" && toolCall.input !== null) {
+              const obj = toolCall.input as Record<string, unknown>;
+              const candidate =
+                (typeof obj["workflowJson"] === "string"
+                  ? (obj["workflowJson"] as string)
+                  : undefined) ||
+                (typeof obj["json"] === "string"
+                  ? (obj["json"] as string)
+                  : undefined) ||
+                (typeof obj["workflow"] === "string"
+                  ? (obj["workflow"] as string)
+                  : undefined);
+              if (typeof candidate !== "string") {
+                // If a non-string object is provided, attempt to stringify it
+                if (
+                  typeof obj["workflow"] === "object" &&
+                  obj["workflow"] !== null
+                ) {
+                  try {
+                    workflowJsonString = JSON.stringify(obj["workflow"]);
+                  } catch {
+                    throw new Error(
+                      "Invalid tool call input format: expected JSON string under 'workflowJson' | 'json' | 'workflow'"
+                    );
+                  }
+                } else {
                   throw new Error(
                     "Invalid tool call input format: expected JSON string under 'workflowJson' | 'json' | 'workflow'"
                   );
                 }
               } else {
-                throw new Error(
-                  "Invalid tool call input format: expected JSON string under 'workflowJson' | 'json' | 'workflow'"
-                );
+                workflowJsonString = candidate;
+              }
+            } else if (typeof toolCall.input === "string") {
+              workflowJsonString = toolCall.input;
+            } else {
+              throw new Error(
+                "Invalid tool call input format for write_workflow; expected JSON string"
+              );
+            }
+
+            const applied = await writeWorkflowFromJson(workflowJsonString);
+            if (applied) {
+              const json = await fetchCurrentWorkflow();
+              addToolResult({
+                tool: "write_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: "Workflow written successfully. New workflow: " + json,
+              });
+            } else {
+              addToolResult({
+                tool: "write_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: "Failed to write workflow",
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "write_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: `Failed to write workflow: ${message}`,
+            });
+          }
+          return;
+        }
+
+        if (toolCall.toolName === "get_current_workflow") {
+          try {
+            const json = await fetchCurrentWorkflow();
+            if (typeof json === "string" && json.length > 0) {
+              addToolResult({
+                tool: "get_current_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: json,
+              });
+            } else {
+              addToolResult({
+                tool: "get_current_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: "No workflow found",
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "get_current_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: `Failed to retrieve workflow: ${message}`,
+            });
+          }
+          return;
+        }
+
+        if (toolCall.toolName === "delete_workflow") {
+          try {
+            const applied = await deleteCurrentWorkflowOnPage();
+            if (applied) {
+              const json = await fetchCurrentWorkflow();
+              addToolResult({
+                tool: "delete_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: "Workflow deleted/cleared successfully.",
+              });
+            } else {
+              addToolResult({
+                tool: "delete_workflow",
+                toolCallId: toolCall.toolCallId,
+                output: "Failed to delete workflow",
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "delete_workflow",
+              toolCallId: toolCall.toolCallId,
+              output: `Failed to delete workflow: ${message}`,
+            });
+          }
+          return;
+        }
+
+        if (toolCall.toolName === "add_node") {
+          try {
+            let nodeType = "";
+            let nodeName = "";
+            let parameters: Record<string, unknown> = {};
+            let position: [number, number] = [0, 0];
+            if (typeof toolCall.input === "object" && toolCall.input !== null) {
+              const obj = toolCall.input as Record<string, unknown>;
+              nodeType = String(obj["nodeType"] ?? "");
+              nodeName = String(obj["nodeName"] ?? "");
+              parameters = (obj["parameters"] as Record<string, unknown>) ?? {};
+              const pos = obj["position"] as unknown;
+              if (
+                Array.isArray(pos) &&
+                pos.length === 2 &&
+                typeof pos[0] === "number" &&
+                typeof pos[1] === "number"
+              ) {
+                position = [pos[0], pos[1]];
               }
             } else {
-              workflowJsonString = candidate;
+              throw new Error("Invalid input for add_node");
             }
-          } else if (typeof toolCall.input === "string") {
-            workflowJsonString = toolCall.input;
-          } else {
-            throw new Error(
-              "Invalid tool call input format for write_workflow; expected JSON string"
-            );
-          }
 
-          const applied = await writeWorkflowFromJson(workflowJsonString);
-          if (applied) {
-            const json = await fetchCurrentWorkflow();
-            addToolResult({
-              tool: "write_workflow",
-              toolCallId: toolCall.toolCallId,
-              output: "Workflow written successfully. New workflow: " + json,
+            const addedId = await addNodeOnPage({
+              nodeType,
+              nodeName,
+              parameters,
+              position,
             });
-          } else {
+            if (typeof addedId === "string" && addedId.length > 0) {
+              const json = await fetchCurrentWorkflow();
+              addToolResult({
+                tool: "add_node",
+                toolCallId: toolCall.toolCallId,
+                output: `Node added successfully with id ${addedId}`,
+              });
+            } else {
+              addToolResult({
+                tool: "add_node",
+                toolCallId: toolCall.toolCallId,
+                output: "Failed to add node",
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
             addToolResult({
-              tool: "write_workflow",
+              tool: "add_node",
               toolCallId: toolCall.toolCallId,
-              output: "Failed to write workflow",
+              output: `Failed to add node: ${message}`,
             });
           }
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error occurred";
-          addToolResult({
-            tool: "write_workflow",
-            toolCallId: toolCall.toolCallId,
-            output: `Failed to write workflow: ${message}`,
-          });
+          return;
         }
-        return;
-      }
 
-      if (toolCall.toolName === "get_current_workflow") {
-        try {
-          const json = await fetchCurrentWorkflow();
-          if (typeof json === "string" && json.length > 0) {
-            addToolResult({
-              tool: "get_current_workflow",
-              toolCallId: toolCall.toolCallId,
-              output: json,
-            });
-          } else {
-            addToolResult({
-              tool: "get_current_workflow",
-              toolCallId: toolCall.toolCallId,
-              output: "No workflow found",
-            });
-          }
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error occurred";
-          addToolResult({
-            tool: "get_current_workflow",
-            toolCallId: toolCall.toolCallId,
-            output: `Failed to retrieve workflow: ${message}`,
-          });
-        }
-        return;
-      }
-
-      if (toolCall.toolName === "delete_workflow") {
-        try {
-          const applied = await deleteCurrentWorkflowOnPage();
-          if (applied) {
-            const json = await fetchCurrentWorkflow();
-            addToolResult({
-              tool: "delete_workflow",
-              toolCallId: toolCall.toolCallId,
-              output: "Workflow deleted/cleared successfully.",
-            });
-          } else {
-            addToolResult({
-              tool: "delete_workflow",
-              toolCallId: toolCall.toolCallId,
-              output: "Failed to delete workflow",
-            });
-          }
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error occurred";
-          addToolResult({
-            tool: "delete_workflow",
-            toolCallId: toolCall.toolCallId,
-            output: `Failed to delete workflow: ${message}`,
-          });
-        }
-        return;
-      }
-
-      if (toolCall.toolName === "add_node") {
-        try {
-          let nodeType = "";
-          let nodeName = "";
-          let parameters: Record<string, unknown> = {};
-          let position: [number, number] = [0, 0];
-          if (typeof toolCall.input === "object" && toolCall.input !== null) {
-            const obj = toolCall.input as Record<string, unknown>;
-            nodeType = String(obj["nodeType"] ?? "");
-            nodeName = String(obj["nodeName"] ?? "");
-            parameters = (obj["parameters"] as Record<string, unknown>) ?? {};
-            const pos = obj["position"] as unknown;
+        if (toolCall.toolName === "delete_node") {
+          try {
             if (
-              Array.isArray(pos) &&
-              pos.length === 2 &&
-              typeof pos[0] === "number" &&
-              typeof pos[1] === "number"
+              typeof toolCall.input !== "object" ||
+              toolCall.input === null ||
+              typeof (toolCall.input as Record<string, unknown>)["nodeId"] !==
+                "string"
             ) {
-              position = [pos[0], pos[1]];
+              throw new Error("Invalid input for delete_node; expected nodeId");
             }
-          } else {
-            throw new Error("Invalid input for add_node");
-          }
-
-          const addedId = await addNodeOnPage({
-            nodeType,
-            nodeName,
-            parameters,
-            position,
-          });
-          if (typeof addedId === "string" && addedId.length > 0) {
-            const json = await fetchCurrentWorkflow();
-            addToolResult({
-              tool: "add_node",
-              toolCallId: toolCall.toolCallId,
-              output: `Node added successfully with id ${addedId}`,
-            });
-          } else {
-            addToolResult({
-              tool: "add_node",
-              toolCallId: toolCall.toolCallId,
-              output: "Failed to add node",
-            });
-          }
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error occurred";
-          addToolResult({
-            tool: "add_node",
-            toolCallId: toolCall.toolCallId,
-            output: `Failed to add node: ${message}`,
-          });
-        }
-        return;
-      }
-
-      if (toolCall.toolName === "delete_node") {
-        try {
-          if (
-            typeof toolCall.input !== "object" ||
-            toolCall.input === null ||
-            typeof (toolCall.input as Record<string, unknown>)["nodeId"] !==
-              "string"
-          ) {
-            throw new Error("Invalid input for delete_node; expected nodeId");
-          }
-          const nodeId = String(
-            (toolCall.input as Record<string, unknown>)["nodeId"]
-          );
-          const ok = await deleteNodeOnPage({ nodeId });
-          if (ok) {
-            const json = await fetchCurrentWorkflow();
+            const nodeId = String(
+              (toolCall.input as Record<string, unknown>)["nodeId"]
+            );
+            const ok = await deleteNodeOnPage({ nodeId });
+            if (ok) {
+              const json = await fetchCurrentWorkflow();
+              addToolResult({
+                tool: "delete_node",
+                toolCallId: toolCall.toolCallId,
+                output: `Node ${nodeId} deleted successfully`,
+              });
+            } else {
+              addToolResult({
+                tool: "delete_node",
+                toolCallId: toolCall.toolCallId,
+                output: "Failed to delete node",
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
             addToolResult({
               tool: "delete_node",
               toolCallId: toolCall.toolCallId,
-              output: `Node ${nodeId} deleted successfully`,
-            });
-          } else {
-            addToolResult({
-              tool: "delete_node",
-              toolCallId: toolCall.toolCallId,
-              output: "Failed to delete node",
+              output: `Failed to delete node: ${message}`,
             });
           }
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error occurred";
-          addToolResult({
-            tool: "delete_node",
-            toolCallId: toolCall.toolCallId,
-            output: `Failed to delete node: ${message}`,
-          });
+          return;
         }
-        return;
+      } finally {
+        setIsToolCalling(false);
       }
     },
   });
@@ -2006,8 +2014,12 @@ export default function App() {
                   const isLastMessage = messageIndex === messages.length - 1;
                   const hasReasoningPart = parts.some(isReasoningPart);
                   const hasTextContent = parts.some(isTextPart);
-                  const showBrainstorming = isLastMessage && hasReasoningPart && status === "streaming" && !hasTextContent;
-                  
+                  const showBrainstorming =
+                    isLastMessage &&
+                    hasReasoningPart &&
+                    status === "streaming" &&
+                    !hasTextContent;
+
                   return (
                     <div key={message.id}>
                       {message.role === "assistant" && sourceCount > 0 && (
@@ -2089,15 +2101,21 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                {status === "submitted" && !generationError && (
-                  <div className="flex justify-center py-4 text-muted-foreground animate-in fade-in duration-300">
-                    <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
-                      <Loader />
-
-                      <span className="text-sm font-medium">Thinking...</span>
+                {(status === "submitted" ||
+                  (status === "streaming" && isToolCalling)) &&
+                  !generationError && (
+                    <div className="ml-4 mt-2 mb-4 animate-in fade-in duration-300">
+                      <div className="flex items-center gap-3 w-fit px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
+                        {" "}
+                        <Loader />
+                        <span className="text-sm font-medium text-muted-foreground">
+                          {isToolCalling
+                            ? "Implementing the changes"
+                            : "Thinking..."}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>
