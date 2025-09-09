@@ -118,21 +118,73 @@ app.post("/", async (c) => {
         delayInMs: 20, // optional: defaults to 10ms
         chunking: "word", // optional: defaults to 'word'
       }),
+      // toolChoice: "required",
       tools: {
-        paste_json_in_n8n: {
-          description:
-            "Paste the JSON in n8n. This tool is used to paste the JSON in n8n.",
-          inputSchema: z.object({
-            json: z.string().describe("The JSON to paste in n8n."),
-          }) as any,
-        },
         get_current_workflow: {
           description:
-            "Get the current workflow in n8n. This tool is used to get the current workflow in n8n.",
+            "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
           inputSchema: z.object({
             toggle: z
               .boolean()
               .describe("The toggle to get the current workflow in n8n."),
+          }) as any,
+        },
+        write_workflow: {
+          description:
+            "Write a new n8n workflow to the active tab from a JSON string. Use when there is no existing workflow or you want to seed a new canvas.",
+          inputSchema: z.object({
+            workflowJson: z
+              .string()
+              .describe(
+                "Stringified full workflow object to set in the n8n store."
+              ),
+          }) as any,
+        },
+        delete_workflow: {
+          description:
+            "Delete/clear the current n8n workflow on the active tab, resetting the Pinia store and Vue Flow state to an empty workflow.",
+          inputSchema: z.object({
+            confirm: z
+              .boolean()
+              .describe("Set to true to confirm deletion of current workflow."),
+          }) as any,
+        },
+        add_node: {
+          description:
+            "Add a new node to the current n8n workflow at a given position with parameters.",
+          inputSchema: z.object({
+            nodeType: z.string().describe("The node's type"),
+            nodeName: z.string().describe("The node's display name"),
+            parameters: z
+              .record(z.string(), z.unknown())
+              .default({})
+              .describe("Node parameters object"),
+            position: z
+              .tuple([z.number(), z.number()])
+              .default([0, 0])
+              .describe("[x, y] position on canvas"),
+          }) as any,
+        },
+        delete_node: {
+          description:
+            "Delete a node by id from the current n8n workflow and clean up connections.",
+          inputSchema: z.object({
+            nodeId: z.string().describe("The id of the node to delete"),
+          }) as any,
+        },
+        modify_workflow: {
+          description:
+            "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node.",
+          inputSchema: z.object({
+            modifications: z
+              .object({
+                nodes: z.array(z.record(z.string(), z.unknown())).optional(),
+                connections: z.record(z.string(), z.unknown()).optional(),
+                updateNode: z.record(z.string(), z.unknown()).optional(),
+              })
+              .describe(
+                "Object with optional keys: nodes (array), connections (object), updateNode (object)."
+              ),
           }) as any,
         },
         ...mcpTools,
