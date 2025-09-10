@@ -59,7 +59,7 @@ export const Response = memo(
             JSON.parse(jsonMatch[0]);
             // Replace the JSON part with a code block
             const beforeJson = text.slice(0, jsonMatch.index);
-            const afterJson = text.slice(jsonMatch.index + jsonMatch[0].length);
+            const afterJson = text.slice(jsonMatch.index! + jsonMatch[0].length);
             const newParts: (string | { type: 'code'; language: string; code: string })[] = [];
             
             if (beforeJson.trim()) newParts.push(beforeJson);

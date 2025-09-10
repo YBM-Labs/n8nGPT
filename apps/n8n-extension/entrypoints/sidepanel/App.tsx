@@ -17,6 +17,7 @@ import {
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   PromptInput,
   PromptInputModelSelect,
@@ -29,6 +30,12 @@ import {
   PromptInputToolbar,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Response } from "@/components/ai-elements/response";
 import { Loader } from "@/components/ai-elements/loader";
 import {
@@ -50,7 +57,8 @@ import {
 import { authClient } from "@/lib/auth-client";
 import AuthPanel from "@/components/auth/authComponent";
 import ShinyText from "@/components/ShinyText";
-import { cn } from "@/lib/utils";
+import logo from "@/assets/icon.png";
+import { User } from "lucide-react";
 
 // ----- Message part type guards to avoid unsafe casts -----
 type SourceUrlPart = { type: "source-url"; url: string };
@@ -108,6 +116,7 @@ export default function App() {
     { name: "Deepseek R1", value: "deepseek/deepseek-r1" },
     { name: "Grok Code Fast 1", value: "x-ai/grok-code-fast-1" },
     { name: "OpenAI GPT-5", value: "openai/gpt-5" },
+    { name: "GLM 4.5", value: "z-ai/glm-4.5" },
   ];
 
   // Local chat UI state
@@ -120,6 +129,7 @@ export default function App() {
   const [generations, setGenerations] = useState<number>(0);
   const [isOnN8n, setIsOnN8n] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [backendError, setBackendError] = useState<string | null>(null);
   const lastAutoPromptedMessageId = useRef<string | null>(null);
   const [isToolCalling, setIsToolCalling] = useState<boolean>(false);
 
@@ -219,17 +229,17 @@ export default function App() {
               "You have reached the maximum number of generations for this month. Please wait until the first day of the next month to continue."
             );
           } else {
-            setGenerationError(
+            setBackendError(
               "You have reached your monthly limit. Please try again next month."
             );
           }
         } catch {
-          setGenerationError(
-            "You have reached your monthly limit. Please try again next month."
+          setBackendError(
+            "Backend error occurred while processing your request. Please try again."
           );
         }
       } else {
-        setGenerationError(
+        setBackendError(
           "An error occurred while processing your request. Please try again."
         );
       }
@@ -516,28 +526,28 @@ export default function App() {
   });
 
   // When assistant finishes a response, try to extract JSON from it and prompt immediately
-  useEffect(() => {
-    if (!isOnN8n) return;
-    if (status === "streaming") return;
-    if (messages.length === 0) return;
-    const last = messages[messages.length - 1] as unknown as {
-      role?: string;
-      id: string;
-      parts?: unknown[];
-    };
-    if (last?.role !== "assistant") return;
-    if (lastAutoPromptedMessageId.current === last.id) return;
-    const parts = Array.isArray(last.parts) ? (last.parts as unknown[]) : [];
-    const text = parts
-      .filter(isTextPart)
-      .map((p: unknown) => (p as TextPart).text)
-      .join("\n");
-    if (!text) return;
-    const json = extractJsonFromText(text);
-    if (json) {
-      lastAutoPromptedMessageId.current = last.id;
-    }
-  }, [messages, status, isOnN8n]);
+  // useEffect(() => {
+  //   if (!isOnN8n) return;
+  //   if (status === "streaming") return;
+  //   if (messages.length === 0) return;
+  //   const last = messages[messages.length - 1] as unknown as {
+  //     role?: string;
+  //     id: string;
+  //     parts?: unknown[];
+  //   };
+  //   if (last?.role !== "assistant") return;
+  //   if (lastAutoPromptedMessageId.current === last.id) return;
+  //   const parts = Array.isArray(last.parts) ? (last.parts as unknown[]) : [];
+  //   const text = parts
+  //     .filter(isTextPart)
+  //     .map((p: unknown) => (p as TextPart).text)
+  //     .join("\n");
+  //   if (!text) return;
+  //   const json = extractJsonFromText(text);
+  //   if (json) {
+  //     lastAutoPromptedMessageId.current = last.id;
+  //   }
+  // }, [messages, status, isOnN8n]);
 
   useEffect(() => {
     const getGenerations = async () => {
@@ -548,7 +558,7 @@ export default function App() {
       setGenerations(data.generations);
     };
     getGenerations();
-  }, [session, messages]);
+  }, [session, status === "ready"]);
 
   /**
    * Handle prompt submission. Prevent default form post and dispatch to useChat.
@@ -1794,186 +1804,186 @@ export default function App() {
 
   // Removed duplicate overwriteCurrentWorkflow definition
 
-  const pasteContent = async ({
-    content,
-  }: {
-    content: string;
-  }): Promise<boolean> => {
-    try {
-      const [tab] = await browser.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
+  // const pasteContent = async ({
+  //   content,
+  // }: {
+  //   content: string;
+  // }): Promise<boolean> => {
+  //   try {
+  //     const [tab] = await browser.tabs.query({
+  //       active: true,
+  //       currentWindow: true,
+  //     });
 
-      const tabId = typeof tab?.id === "number" ? tab.id : null;
-      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+  //     const tabId = typeof tab?.id === "number" ? tab.id : null;
+  //     const tabUrl = typeof tab?.url === "string" ? tab.url : "";
 
-      if (tabId === null || tabUrl.length === 0) {
-        throw new Error("No active tab found");
-      }
+  //     if (tabId === null || tabUrl.length === 0) {
+  //       throw new Error("No active tab found");
+  //     }
 
-      // Check if current tab is an n8n instance
-      if (!isN8nInstance(tabUrl)) {
-        throw new Error(
-          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
-        );
-      }
+  //     // Check if current tab is an n8n instance
+  //     if (!isN8nInstance(tabUrl)) {
+  //       throw new Error(
+  //         "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+  //       );
+  //     }
 
-      const url = new URL(tabUrl);
+  //     const url = new URL(tabUrl);
 
-      try {
-        // Check if we already have permissions
-        const hostPermissions = createN8nHostPermissions(url.hostname);
+  //     try {
+  //       // Check if we already have permissions
+  //       const hostPermissions = createN8nHostPermissions(url.hostname);
 
-        const hasPermission = await browser.permissions.contains({
-          origins: hostPermissions,
-        });
+  //       const hasPermission = await browser.permissions.contains({
+  //         origins: hostPermissions,
+  //       });
 
-        if (!hasPermission) {
-          try {
-            const granted = await browser.permissions.request({
-              origins: hostPermissions,
-            });
+  //       if (!hasPermission) {
+  //         try {
+  //           const granted = await browser.permissions.request({
+  //             origins: hostPermissions,
+  //           });
 
-            if (!granted) {
-              console.warn("Permission denied, continuing anyway");
-            }
-          } catch (permError) {
-            console.warn(
-              "Permission request failed (user gesture required):",
-              permError
-            );
-            // Continue anyway, the extension might still work
-          }
-        }
-      } catch (permError) {
-        console.warn("Permission check failed:", permError);
-        // Continue anyway, might still work
-      }
+  //           if (!granted) {
+  //             console.warn("Permission denied, continuing anyway");
+  //           }
+  //         } catch (permError) {
+  //           console.warn(
+  //             "Permission request failed (user gesture required):",
+  //             permError
+  //           );
+  //           // Continue anyway, the extension might still work
+  //         }
+  //       }
+  //     } catch (permError) {
+  //       console.warn("Permission check failed:", permError);
+  //       // Continue anyway, might still work
+  //     }
 
-      const result = await browser.scripting.executeScript({
-        target: { tabId },
-        world: "MAIN",
-        func: async (content: string, canvasSelectors: string[]) => {
-          try {
-            // Find the best n8n canvas element
-            let targetEl: Element | null = null;
-            for (const selector of canvasSelectors) {
-              const found = document.querySelector(selector);
-              if (found) {
-                targetEl = found;
-                break;
-              }
-            }
+  //     const result = await browser.scripting.executeScript({
+  //       target: { tabId },
+  //       world: "MAIN",
+  //       func: async (content: string, canvasSelectors: string[]) => {
+  //         try {
+  //           // Find the best n8n canvas element
+  //           let targetEl: Element | null = null;
+  //           for (const selector of canvasSelectors) {
+  //             const found = document.querySelector(selector);
+  //             if (found) {
+  //               targetEl = found;
+  //               break;
+  //             }
+  //           }
 
-            // Fallback to active element or body
-            if (targetEl === null) {
-              targetEl = document.activeElement ?? document.body;
-            }
+  //           // Fallback to active element or body
+  //           if (targetEl === null) {
+  //             targetEl = document.activeElement ?? document.body;
+  //           }
 
-            if (targetEl) {
-              // Focus the window and target element first
-              window.focus();
-              document.body.focus();
-              (targetEl as HTMLElement).focus();
+  //           if (targetEl) {
+  //             // Focus the window and target element first
+  //             window.focus();
+  //             document.body.focus();
+  //             (targetEl as HTMLElement).focus();
 
-              // Try to write to clipboard with fallback
-              let clipboardSuccess = false;
-              try {
-                await navigator.clipboard.writeText(content);
-                clipboardSuccess = true;
-              } catch (clipError) {
-                console.warn(
-                  "Clipboard write failed, trying alternative method:",
-                  clipError
-                );
+  //             // Try to write to clipboard with fallback
+  //             let clipboardSuccess = false;
+  //             try {
+  //               await navigator.clipboard.writeText(content);
+  //               clipboardSuccess = true;
+  //             } catch (clipError) {
+  //               console.warn(
+  //                 "Clipboard write failed, trying alternative method:",
+  //                 clipError
+  //               );
 
-                // Try using document.execCommand as fallback
-                try {
-                  const textArea = document.createElement("textarea");
-                  textArea.value = content;
-                  textArea.style.position = "fixed";
-                  textArea.style.left = "-9999px";
-                  document.body.appendChild(textArea);
-                  textArea.focus();
-                  textArea.select();
-                  document.execCommand("copy");
-                  document.body.removeChild(textArea);
-                  clipboardSuccess = true;
-                } catch (fallbackError) {
-                  console.error(
-                    "Fallback clipboard write also failed:",
-                    fallbackError
-                  );
-                  throw new Error(
-                    `Failed to write to clipboard: ${
-                      clipError instanceof Error
-                        ? clipError.message
-                        : "Unknown error"
-                    }`
-                  );
-                }
-              }
+  //               // Try using document.execCommand as fallback
+  //               try {
+  //                 const textArea = document.createElement("textarea");
+  //                 textArea.value = content;
+  //                 textArea.style.position = "fixed";
+  //                 textArea.style.left = "-9999px";
+  //                 document.body.appendChild(textArea);
+  //                 textArea.focus();
+  //                 textArea.select();
+  //                 document.execCommand("copy");
+  //                 document.body.removeChild(textArea);
+  //                 clipboardSuccess = true;
+  //               } catch (fallbackError) {
+  //                 console.error(
+  //                   "Fallback clipboard write also failed:",
+  //                   fallbackError
+  //                 );
+  //                 throw new Error(
+  //                   `Failed to write to clipboard: ${
+  //                     clipError instanceof Error
+  //                       ? clipError.message
+  //                       : "Unknown error"
+  //                   }`
+  //                 );
+  //               }
+  //             }
 
-              if (!clipboardSuccess) {
-                throw new Error("Failed to write content to clipboard");
-              }
+  //             if (!clipboardSuccess) {
+  //               throw new Error("Failed to write content to clipboard");
+  //             }
 
-              // Create and dispatch paste event
-              const createPasteEvent = () =>
-                new ClipboardEvent("paste", {
-                  bubbles: true,
-                  cancelable: true,
-                  clipboardData: (() => {
-                    const dt = new DataTransfer();
-                    dt.setData("text/plain", content);
-                    return dt;
-                  })(),
-                });
+  //             // Create and dispatch paste event
+  //             const createPasteEvent = () =>
+  //               new ClipboardEvent("paste", {
+  //                 bubbles: true,
+  //                 cancelable: true,
+  //                 clipboardData: (() => {
+  //                   const dt = new DataTransfer();
+  //                   dt.setData("text/plain", content);
+  //                   return dt;
+  //                 })(),
+  //               });
 
-              const pasteEvent = createPasteEvent();
-              const dispatched = document.dispatchEvent(pasteEvent);
+  //             const pasteEvent = createPasteEvent();
+  //             const dispatched = document.dispatchEvent(pasteEvent);
 
-              if (!dispatched) {
-                console.warn(
-                  "Paste event was cancelled, but clipboard write succeeded"
-                );
-                // Don't throw error here, clipboard write is more important
-              }
+  //             if (!dispatched) {
+  //               console.warn(
+  //                 "Paste event was cancelled, but clipboard write succeeded"
+  //               );
+  //               // Don't throw error here, clipboard write is more important
+  //             }
 
-              return { success: true, message: "Workflow pasted successfully" };
-            } else {
-              throw new Error(
-                "Could not find suitable target element for pasting"
-              );
-            }
-          } catch (error) {
-            return {
-              success: false,
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Unknown error during paste",
-            };
-          }
-        },
-        args: [content, getN8nCanvasSelectors()],
-      });
+  //             return { success: true, message: "Workflow pasted successfully" };
+  //           } else {
+  //             throw new Error(
+  //               "Could not find suitable target element for pasting"
+  //             );
+  //           }
+  //         } catch (error) {
+  //           return {
+  //             success: false,
+  //             message:
+  //               error instanceof Error
+  //                 ? error.message
+  //                 : "Unknown error during paste",
+  //           };
+  //         }
+  //       },
+  //       args: [content, getN8nCanvasSelectors()],
+  //     });
 
-      const scriptResult = result[0]?.result as
-        | { success: boolean; message: string }
-        | undefined;
+  //     const scriptResult = result[0]?.result as
+  //       | { success: boolean; message: string }
+  //       | undefined;
 
-      if (!scriptResult?.success) {
-        throw new Error(scriptResult?.message || "Script execution failed");
-      }
+  //     if (!scriptResult?.success) {
+  //       throw new Error(scriptResult?.message || "Script execution failed");
+  //     }
 
-      return true;
-    } catch (error) {
-      console.error("Paste content error:", error);
-      throw error;
-    }
-  };
+  //     return true;
+  //   } catch (error) {
+  //     console.error("Paste content error:", error);
+  //     throw error;
+  //   }
+  // };
 
   return (
     <div className="size-full min-h-screen bg-gradient-to-br from-background via-background to-background/95 text-foreground">
@@ -1985,20 +1995,43 @@ export default function App() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 bg-card/30 backdrop-blur-sm">
               <div className="flex items-center gap-3">
                 <div className="w-6 h-6 bg-gradient-to-br from-primary to-primary/80 rounded-md flex items-center justify-center">
-                  <span className="text-xs font-bold text-primary-foreground">
-                    n8n
-                  </span>
+                  <img
+                    src={logo}
+                    className="text-xs font-bold text-primary-foreground"
+                  />
                 </div>
                 <span className="text-sm font-semibold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
-                  n8n GPT Assistant
+                  N8N GPT
                 </span>
               </div>
-              <Badge
-                variant="secondary"
-                className="font-normal bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 transition-colors duration-200"
-              >
-                {generations}/100 Requests
-              </Badge>
+              <div className=" flex items-center gap-1">
+                <Badge
+                  variant="secondary"
+                  className="font-normal text-primary border-primary border-1 transition-colors duration-200"
+                >
+                  {generations}/100 Gens
+                </Badge>
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="cursor-pointer">
+                    <Avatar>
+                      {session?.user?.image && (
+                        <AvatarImage src={session?.user?.image} />
+                      )}
+                      <AvatarFallback>
+                        {session?.user?.name?.slice(0, 2) || "ME"}
+                      </AvatarFallback>
+                    </Avatar>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuLabel
+                      className="cursor-pointer"
+                      onClick={signOut}
+                    >
+                      Sign out
+                    </DropdownMenuLabel>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
             <Conversation className="h-full">
               <ConversationContent className="pb-24">
@@ -2078,6 +2111,7 @@ export default function App() {
                     </div>
                   );
                 })}
+
                 {!isOnN8n && (
                   <div className="mx-4 mb-2 rounded-xl bg-gradient-to-r from-muted/40 to-muted/20 border border-border/30 p-4 text-sm text-muted-foreground animate-in fade-in slide-in-from-top-2 duration-500">
                     <div className="flex items-center gap-2 mb-1">
@@ -2105,6 +2139,25 @@ export default function App() {
                     </p>
                     <button
                       onClick={() => setGenerationError(null)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/30 transition-colors duration-200"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+                {backendError && (
+                  <div className="mx-4 mb-2 rounded-xl bg-gradient-to-r from-destructive/20 to-destructive/10 border border-destructive/30 p-4 text-sm animate-in fade-in slide-in-from-top-2 duration-500">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 bg-destructive rounded-full"></div>
+                      <span className="font-medium text-destructive">
+                        Something went wrong
+                      </span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-destructive/90 mb-3">
+                      {backendError}
+                    </p>
+                    <button
+                      onClick={() => setBackendError(null)}
                       className="text-xs px-3 py-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/30 transition-colors duration-200"
                     >
                       Dismiss
@@ -2168,19 +2221,6 @@ export default function App() {
                   />
                 </PromptInputToolbar>
               </PromptInput>
-              {session && (
-                <div className="text-sm text-muted-foreground flex justify-center items-center m-2">
-                  <button
-                    className="text-xs rounded-lg border border-border/50 px-3 py-1.5 cursor-pointer
-                      hover:border-primary/50 hover:bg-primary/5 hover:text-primary
-                      transition-all duration-200 ease-in-out
-                      hover:scale-105 active:scale-95"
-                    onClick={signOut}
-                  >
-                    👋 Sign out
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         )}
