@@ -128,3 +128,30 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .group.is-assistant,
+  .group.is-assistant * {
+    color: #515151 !important;
+  }
+  
+  .group.is-assistant ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  
+  .group.is-assistant ::-webkit-scrollbar-track {
+    background: #141414;
+  }
+  
+  .group.is-assistant ::-webkit-scrollbar-thumb {
+    background: #515151;
+    border-radius: 5px;
+    width: 10px;
+    height: 10px;
+  }
+  
+  .group.is-assistant ::-webkit-scrollbar-thumb:hover {
+    background: #616161;
+  }
+}
