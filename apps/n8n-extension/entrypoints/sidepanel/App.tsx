@@ -50,6 +50,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import AuthPanel from "@/components/auth/authComponent";
 import ShinyText from "@/components/ShinyText";
+import { cn } from "@/lib/utils";
 
 // ----- Message part type guards to avoid unsafe casts -----
 type SourceUrlPart = { type: "source-url"; url: string };
@@ -2045,7 +2046,16 @@ export default function App() {
                             {parts.map((part, i) => {
                               if (isTextPart(part)) {
                                 return (
-                                  <Response key={`${message.id}-${i}`}>
+                                  <Response
+                                    key={`${message.id}-${i}`}
+                                    className={cn(
+                                      "prose text-primary-foreground",
+                                      {
+                                        "prose-invert text-secondary-foreground":
+                                          message.role === "user",
+                                      }
+                                    )}
+                                  >
                                     {part.text}
                                   </Response>
                                 );
