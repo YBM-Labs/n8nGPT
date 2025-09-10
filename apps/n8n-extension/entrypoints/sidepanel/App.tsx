@@ -59,6 +59,7 @@ import AuthPanel from "@/components/auth/authComponent";
 import ShinyText from "@/components/ShinyText";
 import logo from "@/assets/icon.png";
 import { User } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // ----- Message part type guards to avoid unsafe casts -----
 type SourceUrlPart = { type: "source-url"; url: string };
@@ -1994,7 +1995,7 @@ export default function App() {
           <div className="flex h-[calc(100vh)] flex-col overflow-hidden bg-background/50 backdrop-blur-sm border border-border/50 shadow-lg">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 bg-card/30 backdrop-blur-sm">
               <div className="flex items-center gap-3">
-                <div className="w-6 h-6 bg-gradient-to-br from-primary to-primary/80 rounded-md flex items-center justify-center">
+                <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center">
                   <img
                     src={logo}
                     className="text-xs font-bold text-primary-foreground"
@@ -2164,8 +2165,7 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                {(status === "submitted" ||
-                  (status === "streaming" && isToolCalling)) &&
+                {(status === "submitted" || status !== "ready") &&
                   !generationError && (
                     <div className="ml-4 mt-2 mb-4 animate-in fade-in duration-300">
                       <div className="flex items-center gap-3 w-fit px-4 py-2 rounded-xl bg-muted/20 border border-border/30">

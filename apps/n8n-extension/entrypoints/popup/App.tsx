@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { browser } from "wxt/browser";
 import { useState, useEffect } from "react";
-import logo from "@/assets/icon.png"
+import logo from "@/assets/icon.png";
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(false);
@@ -41,9 +41,14 @@ export default function App() {
         className={`text-center space-y-2 transition-all duration-500 ease-out ${
           showContent ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
         }`}
-      > 
-        <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/80 rounded-xl flex items-center justify-center mx-auto mb-3">
-          <span className="text-xl font-bold text-primary-foreground"><img src={logo} className="text-xs font-bold text-primary-foreground" /></span>
+      >
+        <div className="w-14 h-14 bg-black rounded-full flex items-center justify-center mx-auto mb-3">
+          <span className="text-xl font-bold text-primary-foreground">
+            <img
+              src={logo}
+              className="text-xs font-bold text-primary-foreground"
+            />
+          </span>
         </div>
         <h1 className="font-bold text-xl bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
           n8n GPT Extension
