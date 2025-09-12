@@ -1698,22 +1698,106 @@ export default function App() {
                       const vueFlowNodes = wfObj.nodes.map((node) => {
                         const id = String(node["id"] ?? "");
                         const name = String(node["name"] ?? "");
+                        const type = String(node["type"] ?? "");
+                        const typeVersion = Number(node["typeVersion"] ?? 1);
                         const posArr = Array.isArray(node["position"])
                           ? (node["position"] as Array<number>)
                           : [0, 0];
+                        const disabled = Boolean(node["disabled"] ?? false);
+                        const parameters =
+                          (node["parameters"] as Record<string, unknown>) ?? {};
+                        const inputs = Array.isArray(
+                          (node as Record<string, unknown>)["inputs"]
+                        )
+                          ? ((node as Record<string, unknown>)[
+                              "inputs"
+                            ] as Array<unknown>)
+                          : [];
+                        const outputs = Array.isArray(
+                          (node as Record<string, unknown>)["outputs"]
+                        )
+                          ? ((node as Record<string, unknown>)[
+                              "outputs"
+                            ] as Array<Record<string, unknown>>)
+                          : [{ type: "main", index: 0 }];
+                        const webhookId =
+                          typeof (node as Record<string, unknown>)[
+                            "webhookId"
+                          ] === "string"
+                            ? String(
+                                (node as Record<string, unknown>)["webhookId"]
+                              )
+                            : undefined;
+                        const isTrigger =
+                          typeof type === "string"
+                            ? type.includes("trigger")
+                            : false;
+
                         return {
                           id,
                           type: "canvas-node",
+                          dimensions: { width: 100, height: 100 },
+                          computedPosition: {
+                            x: Number(posArr[0] ?? 0),
+                            y: Number(posArr[1] ?? 0),
+                            z: 1000,
+                          },
+                          handleBounds: {
+                            source: [
+                              {
+                                id: "outputs/main/0",
+                                position: "right",
+                                nodeId: id,
+                                type: "source",
+                                x: 92,
+                                y: 42,
+                                width: 16,
+                                height: 16,
+                              },
+                            ],
+                            target: [],
+                          },
+                          selected: false,
+                          dragging: false,
+                          resizing: false,
+                          initialized: true,
+                          isParent: false,
                           position: {
                             x: Number(posArr[0] ?? 0),
                             y: Number(posArr[1] ?? 0),
                           },
-                          data: node,
+                          data: {
+                            id,
+                            name,
+                            subtitle: "",
+                            type,
+                            typeVersion,
+                            disabled,
+                            parameters,
+                            inputs,
+                            outputs,
+                            connections: { inputs: {}, outputs: {} },
+                            issues: { items: [], visible: false },
+                            pinnedData: { count: 0, visible: false },
+                            execution: { status: "unknown", running: false },
+                            render: {
+                              type: "default",
+                              options: {
+                                trigger: isTrigger,
+                                configuration: false,
+                                configurable: true,
+                                inputs: { labelSize: "small" },
+                                outputs: { labelSize: "small" },
+                              },
+                            },
+                            ...(webhookId ? { webhookId } : {}),
+                          },
+                          events: {},
                           label: name,
                         } as Record<string, unknown>;
                       });
 
-                      const edges: Array<Record<string, unknown>> = [];
+                      const vueFlowEdges: Array<Record<string, unknown>> = [];
                       const connections = (wfObj.connections ?? {}) as Record<
                         string,
                         unknown
@@ -1731,7 +1815,7 @@ export default function App() {
                         )) {
                           const arr = sourceConnections[outputType];
                           if (!Array.isArray(arr)) continue;
-                          arr.forEach((connectionArray) => {
+                          arr.forEach((connectionArray, arrayIndex) => {
                             if (!Array.isArray(connectionArray)) return;
                             connectionArray.forEach((connection) => {
                               const src = wfObj.nodes?.find(
@@ -1742,10 +1826,28 @@ export default function App() {
                                 (n) => String(n["name"]) === tgtName
                               );
                               if (src && tgt) {
-                                edges.push({
-                                  id: `${String(src["id"] ?? "")}-${String(tgt["id"] ?? "")}`,
-                                  source: String(src["id"] ?? ""),
-                                  target: String(tgt["id"] ?? ""),
+                                const srcId = String(
+                                  (src as Record<string, unknown>)["id"] ?? ""
+                                );
+                                const tgtId = String(
+                                  (tgt as Record<string, unknown>)["id"] ?? ""
+                                );
+                                const connType = String(
+                                  (connection as Record<string, unknown>)[
+                                    "type"
+                                  ] ?? "main"
+                                );
+                                const connIndex = Number(
+                                  (connection as Record<string, unknown>)[
+                                    "index"
+                                  ] ?? 0
+                                );
+                                vueFlowEdges.push({
+                                  id: `${srcId}-${tgtId}-${Date.now()}`,
+                                  source: srcId,
+                                  target: tgtId,
+                                  sourceHandle: `outputs/${outputType}/${arrayIndex}`,
+                                  targetHandle: `inputs/${connType}/${connIndex}`,
                                 });
                               }
                             });
@@ -1761,7 +1863,7 @@ export default function App() {
                       flow.edges.value.splice(
                         0,
                         flow.edges.value.length,
-                        ...edges
+                        ...vueFlowEdges
                       );
                     }
 

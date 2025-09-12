@@ -251,6 +251,14 @@ app.post("/", async (c) => {
                 ),
             }),
           },
+          // askForConfirmation: {
+          //   description: "Ask the user for confirmation.",
+          //   inputSchema: z.object({
+          //     message: z
+          //       .string()
+          //       .describe("The message to ask for confirmation."),
+          //   }),
+          // },
           ...mcpTools,
         };
 
@@ -299,6 +307,7 @@ app.post("/", async (c) => {
           console.log("Generations incremented after user message");
         }
       },
+      sendReasoning: false,
     });
   } catch (error) {
     console.error("Error processing request:", error);
@@ -342,6 +351,3 @@ serve(
     console.log(`Server is running on http://localhost:${info.port}`);
   }
 );
-function createMCPClient(arg0: { transport: { type: string; url: string } }) {
-  throw new Error("Function not implemented.");
-}
