@@ -118,6 +118,8 @@ export default function App() {
     { name: "Grok Code Fast 1", value: "x-ai/grok-code-fast-1" },
     { name: "OpenAI GPT-5", value: "openai/gpt-5" },
     { name: "GLM 4.5", value: "z-ai/glm-4.5" },
+    { name: "GPT-4.1 Mini", value: "openai/gpt-4.1-mini" },
+    { name: "Qwen 3 Coder", value: "qwen/qwen3-coder" },
   ];
 
   // Local chat UI state
@@ -1562,6 +1564,8 @@ export default function App() {
   const writeWorkflowFromJson = async (
     workflowJsonString: string
   ): Promise<boolean> => {
+    console.log("workflowJsonString", workflowJsonString);
+
     try {
       const [tab] = await browser.tabs.query({
         active: true,
@@ -1606,6 +1610,147 @@ export default function App() {
             // inner helper similar to updateWorkflowSafely but accepts parsed workflow
             function applyWorkflow(workflowObj: unknown): boolean {
               try {
+                // Sanitize and normalize a workflow object to the shape n8n expects
+                // - Ensure nodes array exists with required fields
+                // - Ensure connections use legacy format: outputType -> Array<Array<Connection>>
+                const isPlainObject = (
+                  v: unknown
+                ): v is Record<string, unknown> =>
+                  typeof v === "object" && v !== null && !Array.isArray(v);
+
+                const toNumber = (v: unknown, fallback: number): number => {
+                  const n = typeof v === "number" ? v : Number(v);
+                  return Number.isFinite(n) ? n : fallback;
+                };
+
+                const sanitizeNode = (
+                  raw: unknown,
+                  idx: number
+                ): Record<string, unknown> | null => {
+                  if (!isPlainObject(raw)) return null;
+                  const nameRaw = raw["name"];
+                  const typeRaw = raw["type"];
+                  const idRaw = raw["id"];
+                  const name =
+                    typeof nameRaw === "string" && nameRaw.length > 0
+                      ? nameRaw
+                      : `Node ${idx + 1}`;
+                  const id =
+                    typeof idRaw === "string" && idRaw.length > 0
+                      ? idRaw
+                      : `node-${Date.now()}-${idx}`;
+                  const type = typeof typeRaw === "string" ? typeRaw : "";
+                  const typeVersion = toNumber(raw["typeVersion"], 1);
+                  const posArr = Array.isArray(raw["position"])
+                    ? (raw["position"] as unknown[])
+                    : [0, 0];
+                  const position: [number, number] = [
+                    toNumber(posArr[0], 0),
+                    toNumber(posArr[1], 0),
+                  ];
+                  const disabled = Boolean(raw["disabled"] ?? false);
+                  const parameters = isPlainObject(raw["parameters"])
+                    ? (raw["parameters"] as Record<string, unknown>)
+                    : {};
+                  const webhookId =
+                    typeof raw["webhookId"] === "string"
+                      ? (raw["webhookId"] as string)
+                      : undefined;
+
+                  return {
+                    parameters,
+                    type,
+                    typeVersion,
+                    position,
+                    id,
+                    name,
+                    disabled,
+                    ...(webhookId ? { webhookId } : {}),
+                  } as Record<string, unknown>;
+                };
+
+                const isConnectionObject = (
+                  v: unknown
+                ): v is Record<string, unknown> =>
+                  isPlainObject(v) && typeof v["node"] === "string";
+
+                const sanitizeConnections = (
+                  raw: unknown,
+                  validNodeNames: Set<string>
+                ): Record<string, unknown> => {
+                  if (!isPlainObject(raw)) return {};
+                  const out: Record<string, unknown> = {};
+                  for (const [sourceName, outputs] of Object.entries(raw)) {
+                    if (
+                      typeof sourceName !== "string" ||
+                      !isPlainObject(outputs)
+                    )
+                      continue;
+                    const outputsObj = outputs as Record<string, unknown>;
+                    const sanitizedOutputs: Record<string, unknown> = {};
+                    for (const [outputType, toPorts] of Object.entries(
+                      outputsObj
+                    )) {
+                      // Normalize to Array<Array<ConnectionObject>>
+                      let arrays: Array<unknown> = [];
+                      if (Array.isArray(toPorts)) {
+                        arrays = toPorts as Array<unknown>;
+                        // If the first level looks like Array<Connection>, wrap as [Array<Connection>]
+                        const first = arrays[0];
+                        const looksLikeFlatConnections =
+                          Array.isArray(arrays) &&
+                          (arrays.length === 0 || isConnectionObject(first));
+                        if (looksLikeFlatConnections) {
+                          arrays = [arrays];
+                        }
+                      } else if (isConnectionObject(toPorts)) {
+                        arrays = [[toPorts]];
+                      } else {
+                        // Unsupported shape; skip
+                        continue;
+                      }
+
+                      // Deep sanitize: keep only valid connection objects that target existing nodes
+                      const cleaned = arrays
+                        .map((maybeArray) =>
+                          Array.isArray(maybeArray)
+                            ? maybeArray
+                                .filter(isConnectionObject)
+                                .map((conn) => {
+                                  const nodeName = String(conn["node"] ?? "");
+                                  if (!validNodeNames.has(nodeName))
+                                    return null;
+                                  const type =
+                                    typeof conn["type"] === "string"
+                                      ? String(conn["type"])
+                                      : "main";
+                                  const index = toNumber(conn["index"], 0);
+                                  return {
+                                    node: nodeName,
+                                    type,
+                                    index,
+                                  } as Record<string, unknown>;
+                                })
+                                .filter(
+                                  (c): c is Record<string, unknown> =>
+                                    c !== null
+                                )
+                            : []
+                        )
+                        .filter((arr) => Array.isArray(arr) && arr.length > 0);
+
+                      if (cleaned.length > 0) {
+                        sanitizedOutputs[outputType] =
+                          cleaned as Array<unknown>;
+                      }
+                    }
+                    if (Object.keys(sanitizedOutputs).length > 0) {
+                      out[sourceName] = sanitizedOutputs;
+                    }
+                  }
+                  return out;
+                };
+
                 const allElements = document.querySelectorAll("*");
                 for (const el of Array.from(allElements)) {
                   const anyEl = el as unknown as {
@@ -1676,11 +1821,45 @@ export default function App() {
                       continue;
                     }
 
-                    const wfObj = workflowObj as {
-                      nodes?: Array<Record<string, unknown>>;
-                      connections?: Record<string, unknown>;
+                    // Build sanitized workflow object
+                    const rawObj = (
+                      isPlainObject(workflowObj)
+                        ? (workflowObj as Record<string, unknown>)
+                        : {}
+                    ) as Record<string, unknown>;
+                    const rawNodes = Array.isArray(rawObj["nodes"])
+                      ? (rawObj["nodes"] as Array<unknown>)
+                      : [];
+                    const sanitizedNodes: Array<Record<string, unknown>> = [];
+                    for (let i = 0; i < rawNodes.length; i++) {
+                      const sanitized = sanitizeNode(rawNodes[i], i);
+                      if (sanitized) sanitizedNodes.push(sanitized);
+                    }
+                    const nodeNames = new Set<string>(
+                      sanitizedNodes.map((n) => String(n["name"]))
+                    );
+                    const sanitizedConnections = sanitizeConnections(
+                      rawObj["connections"],
+                      nodeNames
+                    );
+
+                    const wfObj: {
+                      nodes: Array<Record<string, unknown>>;
+                      connections: Record<string, unknown>;
+                      pinData: Record<string, unknown>;
+                      meta: Record<string, unknown>;
+                    } = {
+                      nodes: sanitizedNodes,
+                      connections: sanitizedConnections,
+                      pinData: isPlainObject(rawObj["pinData"])
+                        ? (rawObj["pinData"] as Record<string, unknown>)
+                        : {},
+                      meta: isPlainObject(rawObj["meta"])
+                        ? (rawObj["meta"] as Record<string, unknown>)
+                        : {},
                     };
-                    if (!wfObj || !Array.isArray(wfObj.nodes)) {
+
+                    if (!Array.isArray(wfObj.nodes)) {
                       return false;
                     }
 
