@@ -125,7 +125,7 @@ export default function App() {
   // Local chat UI state
   const [input, setInput] = useState<string>("");
   const [model, setModel] = useState<string>(
-    MODELS[3]?.value ?? "openai/gpt-4o"
+    MODELS[6]?.value ?? "openai/gpt-4o"
   );
   const [webSearch, setWebSearch] = useState<boolean>(false);
   const [isPasting, setIsPasting] = useState<boolean>(false);
