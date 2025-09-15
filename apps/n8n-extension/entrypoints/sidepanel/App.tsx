@@ -145,201 +145,6 @@ export default function App() {
   };
 
   /**
-   * Set parameters on a node by id with deep merge, keeping Vue Flow in sync.
-   */
-  const setNodeParametersOnPage = async ({
-    nodeId,
-    parameters,
-  }: {
-    nodeId: string;
-    parameters: Record<string, unknown>;
-  }): Promise<boolean> => {
-    try {
-      const [tab] = await browser.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      const tabId = typeof tab?.id === "number" ? tab.id : null;
-      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
-      if (tabId === null || tabUrl.length === 0) {
-        throw new Error("No active tab found");
-      }
-      if (!isN8nInstance(tabUrl)) {
-        throw new Error(
-          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
-        );
-      }
-
-      const url = new URL(tabUrl);
-      try {
-        const hostPermissions = createN8nHostPermissions(url.hostname);
-        const hasPermission = await browser.permissions.contains({
-          origins: hostPermissions,
-        });
-        if (!hasPermission) {
-          try {
-            await browser.permissions.request({ origins: hostPermissions });
-          } catch {}
-        }
-      } catch {}
-
-      const result = await browser.scripting.executeScript({
-        target: { tabId },
-        world: "MAIN",
-        func: (payload: {
-          nodeId: string;
-          parameters: Record<string, unknown>;
-        }) => {
-          try {
-            const deepMerge = (
-              target: Record<string, unknown>,
-              source: Record<string, unknown>
-            ): Record<string, unknown> => {
-              for (const key of Object.keys(source)) {
-                const sVal = source[key];
-                const tVal = target[key];
-                const sIsObj =
-                  typeof sVal === "object" &&
-                  sVal !== null &&
-                  !Array.isArray(sVal);
-                const tIsObj =
-                  typeof tVal === "object" &&
-                  tVal !== null &&
-                  !Array.isArray(tVal);
-                if (sIsObj && tIsObj) {
-                  // @ts-ignore - dynamic merge
-                  target[key] = deepMerge(
-                    tVal as Record<string, unknown>,
-                    sVal as Record<string, unknown>
-                  );
-                } else {
-                  target[key] = sVal as unknown;
-                }
-              }
-              return target;
-            };
-
-            const allElements = document.querySelectorAll("*");
-            for (const el of Array.from(allElements) as any[]) {
-              const vueInstance =
-                (el as any).__vueParentComponent ||
-                (el as any)._vnode?.component;
-              if (vueInstance?.appContext) {
-                const globals =
-                  vueInstance.appContext.app.config.globalProperties;
-                const workflowsStore = globals?.$pinia?._s?.get
-                  ? globals.$pinia._s.get("workflows")
-                  : globals?.$pinia?._s?.["workflows"];
-                const vueFlowStorage = (globals as any)?.$vueFlowStorage as
-                  | {
-                      flows?: Map<
-                        string,
-                        {
-                          nodes: { value: Array<any> };
-                          edges: { value: Array<any> };
-                        }
-                      >;
-                    }
-                  | undefined;
-                const currentWorkflow = (workflowsStore as any)?.workflow as
-                  | { nodes?: Array<any> }
-                  | undefined;
-                if (!currentWorkflow || !Array.isArray(currentWorkflow.nodes)) {
-                  continue;
-                }
-
-                const idx = currentWorkflow.nodes.findIndex(
-                  (n: any) => n && String(n.id ?? "") === payload.nodeId
-                );
-                if (idx === -1) {
-                  return { success: false, message: "Node not found" } as const;
-                }
-
-                const node = currentWorkflow.nodes[idx] as Record<
-                  string,
-                  unknown
-                >;
-                const existingParams =
-                  (node["parameters"] as Record<string, unknown>) ?? {};
-                if (
-                  typeof existingParams === "object" &&
-                  existingParams !== null
-                ) {
-                  deepMerge(
-                    existingParams as Record<string, unknown>,
-                    payload.parameters
-                  );
-                } else {
-                  node["parameters"] = { ...payload.parameters } as Record<
-                    string,
-                    unknown
-                  >;
-                }
-
-                // Sync Vue Flow node data.parameters
-                const flow = vueFlowStorage?.flows?.get("__EMPTY__");
-                if (flow && Array.isArray(flow.nodes?.value)) {
-                  const vfIdx = flow.nodes.value.findIndex(
-                    (n: any) => n && String(n.id ?? "") === payload.nodeId
-                  );
-                  if (vfIdx !== -1) {
-                    const vfData = flow.nodes.value[vfIdx]?.data as
-                      | { parameters?: Record<string, unknown> }
-                      | undefined;
-                    if (vfData && typeof vfData === "object") {
-                      if (
-                        vfData.parameters &&
-                        typeof vfData.parameters === "object"
-                      ) {
-                        deepMerge(
-                          vfData.parameters as Record<string, unknown>,
-                          payload.parameters
-                        );
-                      } else {
-                        vfData.parameters = { ...payload.parameters } as Record<
-                          string,
-                          unknown
-                        >;
-                      }
-                    }
-                  }
-                }
-
-                if (typeof (workflowsStore as any).$patch === "function") {
-                  (workflowsStore as any).$patch({ workflow: currentWorkflow });
-                } else {
-                  (workflowsStore as any).workflow = currentWorkflow;
-                }
-
-                return { success: true } as const;
-              }
-            }
-            return {
-              success: false,
-              message: "Vue context not found",
-            } as const;
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : "Unknown error";
-            return { success: false, message: msg } as const;
-          }
-        },
-        args: [{ nodeId, parameters }],
-      });
-
-      const scriptResult = result?.[0]?.result as
-        | { success: boolean; message?: string }
-        | undefined;
-      if (!scriptResult?.success) {
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.error("Set node parameters error:", err);
-      return false;
-    }
-  };
-
-  /**
    * Detect nodes that currently show issues in the UI (red border, etc.).
    * Uses Vue Flow node data. Returns id, name, type, position and issue messages.
    */
@@ -1114,68 +919,6 @@ export default function App() {
               tool: "connect_nodes",
               toolCallId: toolCall.toolCallId,
               output: `Failed to connect nodes: ${message}`,
-            });
-          }
-          return;
-        }
-
-        if (toolCall.toolName === "set_node_parameters") {
-          try {
-            if (typeof toolCall.input !== "object" || toolCall.input === null) {
-              throw new Error(
-                "Invalid input for set_node_parameters; expected { nodeId: string, parameters: object | json-string }"
-              );
-            }
-            const input = toolCall.input as {
-              nodeId?: string;
-              parameters?: unknown;
-            };
-            const nodeId = String(input.nodeId ?? "");
-            if (!nodeId) throw new Error("nodeId is required");
-
-            let parameters: Record<string, unknown> | null = null;
-            const raw = input.parameters as unknown;
-            if (raw && typeof raw === "object") {
-              parameters = raw as Record<string, unknown>;
-            } else if (typeof raw === "string") {
-              try {
-                parameters = JSON.parse(raw) as Record<string, unknown>;
-              } catch {
-                throw new Error("parameters must be an object or JSON string");
-              }
-            } else {
-              throw new Error("parameters must be provided");
-            }
-
-            const ok = await setNodeParametersOnPage({ nodeId, parameters });
-            if (ok) {
-              const [json, unavailable] = await Promise.all([
-                fetchCurrentWorkflow(),
-                getUnavailableNodesOnPage(),
-              ]);
-              addToolResult({
-                tool: "set_node_parameters",
-                toolCallId: toolCall.toolCallId,
-                output:
-                  "Parameters updated successfully. New workflow: " +
-                  json +
-                  "\nUnavailable nodes: " +
-                  JSON.stringify(unavailable),
-              });
-            } else {
-              addToolResult({
-                tool: "set_node_parameters",
-                toolCallId: toolCall.toolCallId,
-                output: "Failed to update parameters",
-              });
-            }
-          } catch (error) {
-            const message =
-              error instanceof Error ? error.message : "Unknown error occurred";
-            addToolResult({
-              tool: "set_node_parameters",
-              toolCallId: toolCall.toolCallId,
-              output: `Failed to update parameters: ${message}`,
             });
           }
           return;
@@ -3626,7 +3369,7 @@ export default function App() {
                 />
                 <PromptInputToolbar>
                   <PromptInputTools>
-                    {/* <PromptInputModelSelect
+                    <PromptInputModelSelect
                       onValueChange={(value) => setModel(value)}
                       value={model}
                     >
@@ -3643,7 +3386,7 @@ export default function App() {
                           </PromptInputModelSelectItem>
                         ))}
                       </PromptInputModelSelectContent>
-                    </PromptInputModelSelect> */}
+                    </PromptInputModelSelect>
                   </PromptInputTools>
                   <PromptInputSubmit
                     disabled={
