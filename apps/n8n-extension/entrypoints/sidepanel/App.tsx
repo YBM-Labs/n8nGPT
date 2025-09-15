@@ -120,6 +120,7 @@ export default function App() {
     { name: "GLM 4.5", value: "z-ai/glm-4.5" },
     { name: "GPT-4.1 Mini", value: "openai/gpt-4.1-mini" },
     { name: "Qwen 3 Coder", value: "qwen/qwen3-coder" },
+    { name: "Qwen 3 30B A3B", value: "qwen/qwen3-30b-a3b" },
   ];
 
   // Local chat UI state
@@ -140,6 +141,231 @@ export default function App() {
     const { error } = await authClient.signOut();
     if (error) {
       console.error(error);
+    }
+  };
+
+  /**
+   * Detect nodes that currently show issues in the UI (red border, etc.).
+   * Uses Vue Flow node data. Returns id, name, type, position and issue messages.
+   */
+  const getErrorNodesOnPage = async (): Promise<
+    Array<{
+      id: string;
+      name: string;
+      type: string;
+      position: [number, number];
+      issues: Array<string>;
+    }>
+  > => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () => {
+          try {
+            const collectIssues = (
+              n: Record<string, unknown>
+            ): Array<string> => {
+              const issues = (
+                n?.["data"] as Record<string, unknown> | undefined
+              )?.["issues"];
+              const items: Array<unknown> = Array.isArray(
+                (issues as Record<string, unknown> | undefined)?.["items"]
+              )
+                ? ((issues as Record<string, unknown>)?.[
+                    "items"
+                  ] as Array<unknown>)
+                : [];
+              const messages: Array<string> = [];
+              for (const it of items) {
+                const msg = (it as Record<string, unknown>)?.["message"];
+                if (typeof msg === "string" && msg.length > 0)
+                  messages.push(msg);
+              }
+              // If none extracted, but a visible flag exists, include a generic marker
+              const visible = Boolean(
+                (issues as Record<string, unknown> | undefined)?.["visible"] ??
+                  false
+              );
+              if (messages.length === 0 && visible)
+                messages.push("Issue visible");
+              return messages;
+            };
+
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements) as any[]) {
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              if (vueInstance?.appContext) {
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                const vueFlowStorage = (globals as any)?.$vueFlowStorage as
+                  | {
+                      flows?: Map<
+                        string,
+                        {
+                          nodes: { value: Array<any> };
+                          edges: { value: Array<any> };
+                        }
+                      >;
+                    }
+                  | undefined;
+                const flow = vueFlowStorage?.flows?.get("__EMPTY__");
+                if (!flow) continue;
+                const errorNodes: Array<Record<string, unknown>> = [];
+                for (const n of flow.nodes.value as Array<
+                  Record<string, unknown>
+                >) {
+                  const issues = collectIssues(n);
+                  if (issues.length > 0) {
+                    const id = String(n?.["id"] ?? "");
+                    const data = (n?.["data"] ?? {}) as Record<string, unknown>;
+                    const name = String(data?.["name"] ?? "");
+                    const type = String(data?.["type"] ?? "");
+                    const pos = (n?.["position"] as [number, number]) ?? [0, 0];
+                    errorNodes.push({ id, name, type, position: pos, issues });
+                  }
+                }
+                return { success: true, nodes: errorNodes } as const;
+              }
+            }
+            return { success: false, nodes: [] } as const;
+          } catch {
+            return { success: false, nodes: [] } as const;
+          }
+        },
+      });
+      const scriptResult = result?.[0]?.result as
+        | {
+            success: boolean;
+            nodes: Array<{
+              id: string;
+              name: string;
+              type: string;
+              position: [number, number];
+              issues: Array<string>;
+            }>;
+          }
+        | undefined;
+      if (!scriptResult?.success) return [];
+      return scriptResult.nodes ?? [];
+    } catch (err) {
+      console.error("Get error nodes error:", err);
+      return [];
+    }
+  };
+
+  /**
+   * Detect nodes that appear unavailable by DOM placeholder ("?" icon) only.
+   * This matches what the user sees on the canvas.
+   */
+  const getUnavailableNodesOnPage = async (): Promise<
+    Array<{
+      id: string;
+      name: string;
+      type: string;
+      position: [number, number];
+    }>
+  > => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () => {
+          try {
+            const parseTranslate = (el: HTMLElement): [number, number] => {
+              const t = (el as HTMLElement)?.style?.transform || "";
+              const m = t.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/);
+              if (m) return [Number(m[1]), Number(m[2])];
+              return [0, 0];
+            };
+
+            const nodes = document.querySelectorAll(".vue-flow__node[data-id]");
+            const out: Array<{
+              id: string;
+              name: string;
+              type: string;
+              position: [number, number];
+            }> = [];
+            for (const el of Array.from(nodes)) {
+              const nodeEl = el as HTMLElement;
+              const id = nodeEl.getAttribute("data-id") || "";
+              const cn = nodeEl.querySelector(
+                '[data-test-id="canvas-node"]'
+              ) as HTMLElement | null;
+              const name = cn?.getAttribute("data-node-name") || "";
+              const type = cn?.getAttribute("data-node-type") || "";
+              const defaultNode = nodeEl.querySelector(
+                '[data-test-id="canvas-default-node"]'
+              ) as HTMLElement | null;
+              if (!defaultNode) continue;
+
+              const placeholderEl = defaultNode.querySelector(
+                '._nodeIconPlaceholder_5jwz1_152, [class*="nodeIconPlaceholder"]'
+              ) as HTMLElement | null;
+              const placeholderText = (placeholderEl?.textContent || "").trim();
+              const hasImg = !!defaultNode.querySelector(
+                '.n8n-node-icon img, [class*="nodeIconImage"] img'
+              );
+              const hasSvg = !!defaultNode.querySelector(".n8n-node-icon svg");
+
+              const isUnavailable =
+                placeholderEl && placeholderText === "?" && !(hasImg || hasSvg);
+              if (isUnavailable) {
+                out.push({ id, name, type, position: parseTranslate(nodeEl) });
+              }
+            }
+            return { success: true, nodes: out } as const;
+          } catch {
+            return { success: false, nodes: [] } as const;
+          }
+        },
+      });
+      const scriptResult = result?.[0]?.result as
+        | {
+            success: boolean;
+            nodes: Array<{
+              id: string;
+              name: string;
+              type: string;
+              position: [number, number];
+            }>;
+          }
+        | undefined;
+      if (!scriptResult?.success) return [];
+      return scriptResult.nodes ?? [];
+    } catch (err) {
+      console.error("Get unavailable nodes error:", err);
+      return [];
     }
   };
 
@@ -274,11 +500,18 @@ export default function App() {
 
             const applied = await applyWorkflowModifications(modifications);
             if (applied) {
-              const json = await fetchCurrentWorkflow();
+              const [json, unavailable] = await Promise.all([
+                fetchCurrentWorkflow(),
+                getUnavailableNodesOnPage(),
+              ]);
               addToolResult({
                 tool: "modify_workflow",
                 toolCallId: toolCall.toolCallId,
-                output: "Workflow modified successfully. New workflow: " + json,
+                output:
+                  "Workflow modified successfully. New workflow: " +
+                  json +
+                  "\nUnavailable nodes: " +
+                  JSON.stringify(unavailable),
               });
             } else {
               addToolResult({
@@ -345,11 +578,18 @@ export default function App() {
 
             const applied = await writeWorkflowFromJson(workflowJsonString);
             if (applied) {
-              const json = await fetchCurrentWorkflow();
+              const [json, unavailable] = await Promise.all([
+                fetchCurrentWorkflow(),
+                getUnavailableNodesOnPage(),
+              ]);
               addToolResult({
                 tool: "write_workflow",
                 toolCallId: toolCall.toolCallId,
-                output: "Workflow written successfully. New workflow: " + json,
+                output:
+                  "Workflow written successfully. New workflow: " +
+                  json +
+                  "\nUnavailable nodes: " +
+                  JSON.stringify(unavailable),
               });
             } else {
               addToolResult({
@@ -406,7 +646,8 @@ export default function App() {
               addToolResult({
                 tool: "delete_workflow",
                 toolCallId: toolCall.toolCallId,
-                output: "Workflow deleted/cleared successfully.",
+                output:
+                  "Workflow deleted/cleared successfully." + `Canvas: ${json}`,
               });
             } else {
               addToolResult({
@@ -458,11 +699,17 @@ export default function App() {
               position,
             });
             if (typeof addedId === "string" && addedId.length > 0) {
-              const json = await fetchCurrentWorkflow();
+              const [json, unavailable] = await Promise.all([
+                fetchCurrentWorkflow(),
+                getUnavailableNodesOnPage(),
+              ]);
               addToolResult({
                 tool: "add_node",
                 toolCallId: toolCall.toolCallId,
-                output: `Node added successfully with id ${addedId}`,
+                output:
+                  `Node added successfully with id ${addedId}` +
+                  "\nUnavailable nodes: " +
+                  JSON.stringify(unavailable),
               });
             } else {
               addToolResult({
@@ -518,6 +765,160 @@ export default function App() {
               tool: "delete_node",
               toolCallId: toolCall.toolCallId,
               output: `Failed to delete node: ${message}`,
+            });
+          }
+          return;
+        }
+
+        if (toolCall.toolName === "get_node_info") {
+          try {
+            let nodeId = "";
+            if (
+              typeof toolCall.input === "object" &&
+              toolCall.input !== null &&
+              typeof (toolCall.input as Record<string, unknown>)["nodeId"] ===
+                "string"
+            ) {
+              nodeId = String(
+                (toolCall.input as Record<string, unknown>)["nodeId"]
+              );
+            } else if (typeof toolCall.input === "string") {
+              nodeId = toolCall.input;
+            } else {
+              throw new Error(
+                "Invalid input for get_node_info; expected { nodeId: string } or a string"
+              );
+            }
+
+            const info = await getNodeInfoById(nodeId);
+            if (info) {
+              addToolResult({
+                tool: "get_node_info",
+                toolCallId: toolCall.toolCallId,
+                output: JSON.stringify(info),
+              });
+            } else {
+              addToolResult({
+                tool: "get_node_info",
+                toolCallId: toolCall.toolCallId,
+                output: `Node ${nodeId} not found`,
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "get_node_info",
+              toolCallId: toolCall.toolCallId,
+              output: `Failed to get node info: ${message}`,
+            });
+          }
+          return;
+        }
+
+        if (toolCall.toolName === "get_error_nodes") {
+          try {
+            const nodes = await getErrorNodesOnPage();
+            addToolResult({
+              tool: "get_error_nodes",
+              toolCallId: toolCall.toolCallId,
+              output: JSON.stringify(nodes),
+            });
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "get_error_nodes",
+              toolCallId: toolCall.toolCallId,
+              output: `Failed to get error nodes: ${message}`,
+            });
+          }
+          return;
+        }
+
+        if (toolCall.toolName === "get_unavailable_nodes") {
+          try {
+            const nodes = await getUnavailableNodesOnPage();
+            addToolResult({
+              tool: "get_unavailable_nodes",
+              toolCallId: toolCall.toolCallId,
+              output: JSON.stringify(nodes),
+            });
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "get_unavailable_nodes",
+              toolCallId: toolCall.toolCallId,
+              output: `Failed to get unavailable nodes: ${message}`,
+            });
+          }
+          return;
+        }
+
+        if (toolCall.toolName === "connect_nodes") {
+          try {
+            if (
+              typeof toolCall.input !== "object" ||
+              toolCall.input === null ||
+              typeof (toolCall.input as any).from !== "object" ||
+              typeof (toolCall.input as any).to !== "object"
+            ) {
+              throw new Error(
+                "Invalid input for connect_nodes; expected { from: {...}, to: {...} }"
+              );
+            }
+            const input = toolCall.input as {
+              from: {
+                nodeId?: string;
+                outputType?: string;
+                arrayIndex?: number;
+              };
+              to: { nodeId?: string; inputType?: string; index?: number };
+            };
+            const from = {
+              nodeId: String(input.from?.nodeId ?? ""),
+              outputType: input.from?.outputType,
+              arrayIndex: input.from?.arrayIndex,
+            };
+            const to = {
+              nodeId: String(input.to?.nodeId ?? ""),
+              inputType: input.to?.inputType,
+              index: input.to?.index,
+            };
+            if (!from.nodeId || !to.nodeId) {
+              throw new Error("from.nodeId and to.nodeId are required");
+            }
+
+            const ok = await connectNodesOnPage({ from, to });
+            if (ok) {
+              const [json, unavailable] = await Promise.all([
+                fetchCurrentWorkflow(),
+                getUnavailableNodesOnPage(),
+              ]);
+              addToolResult({
+                tool: "connect_nodes",
+                toolCallId: toolCall.toolCallId,
+                output:
+                  "Nodes connected successfully. New workflow: " +
+                  json +
+                  "\nUnavailable nodes: " +
+                  JSON.stringify(unavailable),
+              });
+            } else {
+              addToolResult({
+                tool: "connect_nodes",
+                toolCallId: toolCall.toolCallId,
+                output: "Failed to connect nodes",
+              });
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unknown error occurred";
+            addToolResult({
+              tool: "connect_nodes",
+              toolCallId: toolCall.toolCallId,
+              output: `Failed to connect nodes: ${message}`,
             });
           }
           return;
@@ -1425,6 +1826,500 @@ export default function App() {
     } catch (err) {
       console.error("Delete node error:", err);
       return false;
+    }
+  };
+
+  /**
+   * Connect two nodes on the active n8n tab by ids.
+   * Creates legacy-shape connection: connections[sourceName][outputType][arrayIndex].push({ node: targetName, type: inputType, index })
+   * Also appends a Vue Flow edge for visual sync.
+   */
+  const connectNodesOnPage = async ({
+    from,
+    to,
+  }: {
+    from: { nodeId: string; outputType?: string; arrayIndex?: number };
+    to: { nodeId: string; inputType?: string; index?: number };
+  }): Promise<boolean> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+
+      const url = new URL(tabUrl);
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (payload: {
+          from: { nodeId: string; outputType?: string; arrayIndex?: number };
+          to: { nodeId: string; inputType?: string; index?: number };
+        }) => {
+          try {
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements) as any[]) {
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              if (vueInstance?.appContext) {
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                const workflowsStore = globals?.$pinia?._s?.get
+                  ? globals.$pinia._s.get("workflows")
+                  : globals?.$pinia?._s?.["workflows"];
+                const vueFlowStorage = (globals as any)?.$vueFlowStorage as
+                  | {
+                      flows?: Map<
+                        string,
+                        {
+                          nodes: { value: Array<any> };
+                          edges: { value: Array<any> };
+                        }
+                      >;
+                    }
+                  | undefined;
+                const currentWorkflow = (workflowsStore as any)?.workflow as
+                  | {
+                      nodes?: Array<any>;
+                      connections?: Record<string, any>;
+                    }
+                  | undefined;
+                if (!currentWorkflow || !Array.isArray(currentWorkflow.nodes)) {
+                  continue;
+                }
+
+                const nodes = currentWorkflow.nodes as Array<
+                  Record<string, any>
+                >;
+                const src = nodes.find(
+                  (n) => String(n?.id ?? "") === payload.from.nodeId
+                );
+                const tgt = nodes.find(
+                  (n) => String(n?.id ?? "") === payload.to.nodeId
+                );
+                if (!src || !tgt) {
+                  return {
+                    success: false,
+                    message: "Source or target not found",
+                  } as const;
+                }
+
+                const sourceName = String(src.name ?? "");
+                const targetName = String(tgt.name ?? "");
+                const outputType = String(payload.from.outputType ?? "main");
+                const arrayIndex = Number(payload.from.arrayIndex ?? 0);
+                const inputType = String(payload.to.inputType ?? "main");
+                const index = Number(payload.to.index ?? 0);
+
+                const nextConnections: Record<string, any> = {
+                  ...(currentWorkflow.connections ?? {}),
+                };
+                if (!nextConnections[sourceName])
+                  nextConnections[sourceName] = {};
+                if (!Array.isArray(nextConnections[sourceName][outputType])) {
+                  nextConnections[sourceName][outputType] = [] as Array<any[]>;
+                }
+
+                const arrs = nextConnections[sourceName][outputType] as Array<
+                  any[]
+                >;
+                while (arrs.length <= arrayIndex) arrs.push([]);
+                const bucket = arrs[arrayIndex] as Array<any>;
+
+                // Avoid duplicate exact connection
+                const exists = Array.isArray(bucket)
+                  ? bucket.some(
+                      (c) =>
+                        c &&
+                        String(c.node ?? "") === targetName &&
+                        String(c.type ?? "main") === inputType &&
+                        Number(c.index ?? 0) === index
+                    )
+                  : false;
+                if (!exists) {
+                  bucket.push({ node: targetName, type: inputType, index });
+                }
+
+                currentWorkflow.connections = nextConnections;
+
+                // Update Vue Flow edges
+                const flow = vueFlowStorage?.flows?.get("__EMPTY__");
+                if (flow) {
+                  const srcId = String(src.id ?? "");
+                  const tgtId = String(tgt.id ?? "");
+                  flow.edges.value.push({
+                    id: `${srcId}-${tgtId}-${Date.now()}`,
+                    source: srcId,
+                    target: tgtId,
+                    sourceHandle: `outputs/${outputType}/${arrayIndex}`,
+                    targetHandle: `inputs/${inputType}/${index}`,
+                  });
+                }
+
+                if (typeof (workflowsStore as any).$patch === "function") {
+                  (workflowsStore as any).$patch({ workflow: currentWorkflow });
+                } else {
+                  (workflowsStore as any).workflow = currentWorkflow;
+                }
+
+                return { success: true } as const;
+              }
+            }
+            return {
+              success: false,
+              message: "Vue context not found",
+            } as const;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "Unknown error";
+            return { success: false, message: msg } as const;
+          }
+        },
+        args: [
+          {
+            from,
+            to,
+          },
+        ],
+      });
+
+      const scriptResult = result?.[0]?.result as
+        | { success: boolean; message?: string }
+        | undefined;
+      if (!scriptResult?.success) {
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error("Connect nodes error:", err);
+      return false;
+    }
+  };
+
+  /**
+   * Retrieve detailed information about a node by id from the active n8n tab.
+   * Returns sanitized node fields and inbound/outbound connection summaries.
+   */
+  const getNodeInfoById = async (
+    nodeId: string
+  ): Promise<{
+    node: {
+      id: string;
+      name: string;
+      type: string;
+      typeVersion: number;
+      position: [number, number];
+      disabled: boolean;
+      parameters: Record<string, unknown>;
+      webhookId?: string;
+    };
+    inbound: Array<{
+      fromNodeId: string;
+      fromNodeName: string;
+      outputType: string;
+      arrayIndex: number;
+      type: string;
+      index: number;
+    }>;
+    outbound: Array<{
+      toNodeId: string;
+      toNodeName: string;
+      outputType: string;
+      arrayIndex: number;
+      type: string;
+      index: number;
+    }>;
+  } | null> => {
+    try {
+      const [tab] = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+
+      const tabId = typeof tab?.id === "number" ? tab.id : null;
+      const tabUrl = typeof tab?.url === "string" ? tab.url : "";
+
+      if (tabId === null || tabUrl.length === 0) {
+        throw new Error("No active tab found");
+      }
+
+      if (!isN8nInstance(tabUrl)) {
+        throw new Error(
+          "Current tab is not an n8n instance. Please navigate to an n8n workflow page."
+        );
+      }
+
+      const url = new URL(tabUrl);
+      try {
+        const hostPermissions = createN8nHostPermissions(url.hostname);
+        const hasPermission = await browser.permissions.contains({
+          origins: hostPermissions,
+        });
+        if (!hasPermission) {
+          try {
+            await browser.permissions.request({ origins: hostPermissions });
+          } catch {}
+        }
+      } catch {}
+
+      const result = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (payload: { nodeId: string }) => {
+          try {
+            const allElements = document.querySelectorAll("*");
+            for (const el of Array.from(allElements) as any[]) {
+              const vueInstance =
+                (el as any).__vueParentComponent ||
+                (el as any)._vnode?.component;
+              if (vueInstance?.appContext) {
+                const globals =
+                  vueInstance.appContext.app.config.globalProperties;
+                const pinia = globals?.$pinia as
+                  | { _s?: Map<string, unknown> & Record<string, unknown> }
+                  | undefined;
+                const workflowsStore =
+                  pinia &&
+                  ((typeof pinia._s?.get === "function"
+                    ? (pinia._s as Map<string, unknown>).get("workflows")
+                    : (pinia._s as Record<string, unknown> | undefined)?.[
+                        "workflows"
+                      ]) as
+                    | {
+                        workflow?: unknown;
+                        $patch?: (payload: Record<string, unknown>) => void;
+                      }
+                    | undefined);
+
+                const currentWorkflow = (workflowsStore as any)?.workflow as
+                  | {
+                      nodes?: Array<Record<string, unknown>>;
+                      connections?: Record<string, unknown>;
+                    }
+                  | undefined;
+                if (!currentWorkflow || !Array.isArray(currentWorkflow.nodes)) {
+                  continue;
+                }
+
+                const nodes = currentWorkflow.nodes as Array<
+                  Record<string, unknown>
+                >;
+                const node = nodes.find(
+                  (n) => String(n?.["id"] ?? "") === payload.nodeId
+                );
+                if (!node) {
+                  return { success: false, message: "Node not found" };
+                }
+
+                const nodeName = String(node["name"] ?? "");
+                const nodeType = String(node["type"] ?? "");
+                const nodeTypeVersion = Number(node["typeVersion"] ?? 1);
+                const posArr = Array.isArray(node["position"])
+                  ? (node["position"] as Array<number>)
+                  : [0, 0];
+                const disabled = Boolean(node["disabled"] ?? false);
+                const parameters =
+                  (node["parameters"] as Record<string, unknown>) ?? {};
+                const webhookId =
+                  typeof node["webhookId"] === "string"
+                    ? (node["webhookId"] as string)
+                    : undefined;
+
+                const connections = (currentWorkflow.connections ??
+                  {}) as Record<string, unknown>;
+
+                // Outbound connections from this node (by node name)
+                const outbound: Array<{
+                  toNodeId: string;
+                  toNodeName: string;
+                  outputType: string;
+                  arrayIndex: number;
+                  type: string;
+                  index: number;
+                }> = [];
+                const srcOutputsRaw = connections[nodeName] as
+                  | Record<string, unknown>
+                  | undefined;
+                if (srcOutputsRaw && typeof srcOutputsRaw === "object") {
+                  for (const [outputType, arrays] of Object.entries(
+                    srcOutputsRaw
+                  )) {
+                    if (!Array.isArray(arrays)) continue;
+                    (arrays as Array<unknown>).forEach((arr, arrayIndex) => {
+                      if (!Array.isArray(arr)) return;
+                      (arr as Array<unknown>).forEach((conn) => {
+                        const tgtName = String(
+                          (conn as Record<string, unknown>)?.["node"] ?? ""
+                        );
+                        const type = String(
+                          (conn as Record<string, unknown>)?.["type"] ?? "main"
+                        );
+                        const index = Number(
+                          (conn as Record<string, unknown>)?.["index"] ?? 0
+                        );
+                        const tgt = nodes.find(
+                          (n) => String(n["name"] ?? "") === tgtName
+                        );
+                        if (tgt) {
+                          outbound.push({
+                            toNodeId: String(tgt["id"] ?? ""),
+                            toNodeName: tgtName,
+                            outputType,
+                            arrayIndex,
+                            type,
+                            index,
+                          });
+                        }
+                      });
+                    });
+                  }
+                }
+
+                // Inbound connections to this node (scan all sources)
+                const inbound: Array<{
+                  fromNodeId: string;
+                  fromNodeName: string;
+                  outputType: string;
+                  arrayIndex: number;
+                  type: string;
+                  index: number;
+                }> = [];
+                for (const [sourceName, outputs] of Object.entries(
+                  connections
+                )) {
+                  if (!outputs || typeof outputs !== "object") continue;
+                  for (const [outputType, arrays] of Object.entries(
+                    outputs as Record<string, unknown>
+                  )) {
+                    if (!Array.isArray(arrays)) continue;
+                    (arrays as Array<unknown>).forEach((arr, arrayIndex) => {
+                      if (!Array.isArray(arr)) return;
+                      (arr as Array<unknown>).forEach((conn) => {
+                        const tgtName = String(
+                          (conn as Record<string, unknown>)?.["node"] ?? ""
+                        );
+                        if (tgtName !== nodeName) return;
+                        const type = String(
+                          (conn as Record<string, unknown>)?.["type"] ?? "main"
+                        );
+                        const index = Number(
+                          (conn as Record<string, unknown>)?.["index"] ?? 0
+                        );
+                        const src = nodes.find(
+                          (n) => String(n["name"] ?? "") === sourceName
+                        );
+                        if (src) {
+                          inbound.push({
+                            fromNodeId: String(src["id"] ?? ""),
+                            fromNodeName: sourceName,
+                            outputType,
+                            arrayIndex,
+                            type,
+                            index,
+                          });
+                        }
+                      });
+                    });
+                  }
+                }
+
+                return {
+                  success: true,
+                  data: {
+                    node: {
+                      id: String(node["id"] ?? ""),
+                      name: nodeName,
+                      type: nodeType,
+                      typeVersion: nodeTypeVersion,
+                      position: [
+                        Number(posArr?.[0] ?? 0),
+                        Number(posArr?.[1] ?? 0),
+                      ],
+                      disabled,
+                      parameters,
+                      ...(webhookId ? { webhookId } : {}),
+                    },
+                    inbound,
+                    outbound,
+                  },
+                } as const;
+              }
+            }
+            return {
+              success: false,
+              message: "Could not access Vue app context",
+            };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "Unknown error";
+            return { success: false, message: msg };
+          }
+        },
+        args: [{ nodeId }],
+      });
+
+      const scriptResult = result?.[0]?.result as
+        | {
+            success: boolean;
+            data?: {
+              node: {
+                id: string;
+                name: string;
+                type: string;
+                typeVersion: number;
+                position: [number, number];
+                disabled: boolean;
+                parameters: Record<string, unknown>;
+                webhookId?: string;
+              };
+              inbound: Array<{
+                fromNodeId: string;
+                fromNodeName: string;
+                outputType: string;
+                arrayIndex: number;
+                type: string;
+                index: number;
+              }>;
+              outbound: Array<{
+                toNodeId: string;
+                toNodeName: string;
+                outputType: string;
+                arrayIndex: number;
+                type: string;
+                index: number;
+              }>;
+            };
+            message?: string;
+          }
+        | undefined;
+
+      if (!scriptResult?.success || !scriptResult.data) {
+        return null;
+      }
+      return scriptResult.data;
+    } catch (err) {
+      console.error("Get node info error:", err);
+      return null;
     }
   };
 

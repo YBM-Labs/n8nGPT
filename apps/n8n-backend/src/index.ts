@@ -16,6 +16,7 @@ import { auth } from "./lib/auth.js";
 import { getGenerations, incrementGenerations } from "./lib/generations.js";
 import { loadSystemPromptText } from "./utils/helperFunctions.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { groq } from "@ai-sdk/groq";
 dotenv.config();
 
 const app = new Hono();
@@ -177,6 +178,45 @@ app.post("/", async (c) => {
                 ),
             }),
           },
+          get_node_info: {
+            description:
+              "Get detailed information about a node by id, including inbound and outbound connections.",
+            inputSchema: z.object({
+              nodeId: z
+                .string()
+                .describe("The id of the node to inspect (string id)."),
+            }),
+          },
+          get_error_nodes: {
+            description:
+              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          get_unavailable_nodes: {
+            description:
+              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          connect_nodes: {
+            description:
+              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
+            inputSchema: z.object({
+              from: z.object({
+                nodeId: z.string().describe("Source node id"),
+                outputType: z.string().optional(),
+                arrayIndex: z.number().optional(),
+              }),
+              to: z.object({
+                nodeId: z.string().describe("Target node id"),
+                inputType: z.string().optional(),
+                index: z.number().optional(),
+              }),
+            }),
+          },
         }
       : {
           get_current_workflow: {
@@ -248,6 +288,45 @@ app.post("/", async (c) => {
                 ),
             }),
           },
+          get_node_info: {
+            description:
+              "Get detailed information about a node by id, including inbound and outbound connections.",
+            inputSchema: z.object({
+              nodeId: z
+                .string()
+                .describe("The id of the node to inspect (string id)."),
+            }),
+          },
+          get_error_nodes: {
+            description:
+              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          get_unavailable_nodes: {
+            description:
+              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          connect_nodes: {
+            description:
+              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
+            inputSchema: z.object({
+              from: z.object({
+                nodeId: z.string().describe("Source node id"),
+                outputType: z.string().optional(),
+                arrayIndex: z.number().optional(),
+              }),
+              to: z.object({
+                nodeId: z.string().describe("Target node id"),
+                inputType: z.string().optional(),
+                index: z.number().optional(),
+              }),
+            }),
+          },
           // askForConfirmation: {
           //   description: "Ask the user for confirmation.",
           //   inputSchema: z.object({
@@ -264,6 +343,7 @@ app.post("/", async (c) => {
     try {
       result = streamText({
         model: openrouter(model || "openai/gpt-5"),
+        // model: groq("qwen/qwen3-32b"),
         messages: convertToModelMessages(messages),
         experimental_transform: smoothStream({
           delayInMs: 20, // optional: defaults to 10ms
