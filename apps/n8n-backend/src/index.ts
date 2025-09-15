@@ -342,11 +342,11 @@ app.post("/", async (c) => {
     let result;
     try {
       result = streamText({
-        model: openrouter(model || "openai/gpt-5"),
+        model: openrouter("z-ai/glm-4.5:nitro"),
         // model: groq("qwen/qwen3-32b"),
         messages: convertToModelMessages(messages),
         experimental_transform: smoothStream({
-          delayInMs: 20, // optional: defaults to 10ms
+          delayInMs: 10, // optional: defaults to 10ms
           chunking: "word", // optional: defaults to 'word'
         }),
         // toolChoice: "required",

@@ -117,7 +117,7 @@ export default function App() {
     { name: "Deepseek R1", value: "deepseek/deepseek-r1" },
     { name: "Grok Code Fast 1", value: "x-ai/grok-code-fast-1" },
     { name: "OpenAI GPT-5", value: "openai/gpt-5" },
-    { name: "GLM 4.5", value: "z-ai/glm-4.5" },
+    { name: "GLM 4.5", value: "z-ai/glm-4.5:nitro" },
     { name: "GPT-4.1 Mini", value: "openai/gpt-4.1-mini" },
     { name: "Qwen 3 Coder", value: "qwen/qwen3-coder" },
     { name: "Qwen 3 30B A3B", value: "qwen/qwen3-30b-a3b" },
@@ -927,6 +927,7 @@ export default function App() {
         setIsToolCalling(false);
       }
     },
+    experimental_throttle: 50,
   });
 
   // When assistant finishes a response, try to extract JSON from it and prompt immediately
@@ -3369,7 +3370,7 @@ export default function App() {
                 />
                 <PromptInputToolbar>
                   <PromptInputTools>
-                    <PromptInputModelSelect
+                    {/* <PromptInputModelSelect
                       onValueChange={(value) => setModel(value)}
                       value={model}
                     >
@@ -3386,7 +3387,7 @@ export default function App() {
                           </PromptInputModelSelectItem>
                         ))}
                       </PromptInputModelSelectContent>
-                    </PromptInputModelSelect>
+                    </PromptInputModelSelect> */}
                   </PromptInputTools>
                   <PromptInputSubmit
                     disabled={
