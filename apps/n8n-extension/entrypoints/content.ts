@@ -5,6 +5,7 @@ export default defineContentScript({
   matches: ["https://*/*", "http://*/*"],
   runAt: "document_end",
   main() {
+    console.log("Hi from n8ngpt");
     // Only run on pages that appear to be n8n instances
     if (isN8nPageByDOM()) {
       console.log("N8N page detected, content script active");

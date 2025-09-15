@@ -20,6 +20,9 @@ importers:
 
   apps/n8n-backend:
     dependencies:
+      '@ai-sdk/groq':
+        specifier: ^2.0.19
+        version: 2.0.19(zod@4.1.0)
       '@hono/node-server':
         specifier: ^1.19.0
         version: 1.19.0(hono@4.9.4)
@@ -250,8 +253,20 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4
 
+  '@ai-sdk/groq@2.0.19':
+    resolution: {integrity: sha512-VegT0g1X7b2zDYOQvBx1YzKdnBtkyIsGnUBDW4JOft88jv0vUe+sE1H9cvRbKgt2Pd0970JuRM9Ok9D4WYP4+A==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4
+
   '@ai-sdk/provider-utils@3.0.5':
     resolution: {integrity: sha512-HliwB/yzufw3iwczbFVE2Fiwf1XqROB/I6ng8EKUsPM5+2wnIa8f4VbljZcDx+grhFrPV+PnRZH7zBqi8WZM7Q==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4
+
+  '@ai-sdk/provider-utils@3.0.9':
+    resolution: {integrity: sha512-Pm571x5efqaI4hf9yW4KsVlDBDme8++UepZRnq+kqVBWWjgvGhQlzU8glaFq0YJEB9kkxZHbRRyVeHoV2sRYaQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4
@@ -4937,6 +4952,12 @@ snapshots:
       '@ai-sdk/provider-utils': 3.0.5(zod@4.1.0)
       zod: 4.1.0
 
+  '@ai-sdk/groq@2.0.19(zod@4.1.0)':
+    dependencies:
+      '@ai-sdk/provider': 2.0.0
+      '@ai-sdk/provider-utils': 3.0.9(zod@4.1.0)
+      zod: 4.1.0
+
   '@ai-sdk/provider-utils@3.0.5(zod@4.1.0)':
     dependencies:
       '@ai-sdk/provider': 2.0.0
@@ -4944,6 +4965,13 @@ snapshots:
       eventsource-parser: 3.0.5
       zod: 4.1.0
       zod-to-json-schema: 3.24.6(zod@4.1.0)
+
+  '@ai-sdk/provider-utils@3.0.9(zod@4.1.0)':
+    dependencies:
+      '@ai-sdk/provider': 2.0.0
+      '@standard-schema/spec': 1.0.0
+      eventsource-parser: 3.0.5
+      zod: 4.1.0
 
   '@ai-sdk/provider@2.0.0':
     dependencies:

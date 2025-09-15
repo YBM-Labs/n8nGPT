@@ -11,13 +11,12 @@ import {
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { cors } from "hono/cors";
 import { z } from "zod";
-
-import { env } from "hono/adapter";
 import dotenv from "dotenv";
 import { auth } from "./lib/auth.js";
 import { getGenerations, incrementGenerations } from "./lib/generations.js";
 import { loadSystemPromptText } from "./utils/helperFunctions.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { groq } from "@ai-sdk/groq";
 dotenv.config();
 
 const app = new Hono();
@@ -48,6 +47,10 @@ app.use(
 // Load once at startup to avoid reading from disk on every request
 const SYSTEM_PROMPT: string = loadSystemPromptText();
 
+const openrouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
+
 app.post("/", async (c) => {
   console.log("Generation Request received");
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -67,11 +70,6 @@ app.post("/", async (c) => {
   }
   console.log("Generations found");
 
-  const { OPENROUTER_API_KEY } = env<{ OPENROUTER_API_KEY: string }>(c);
-  const openrouter = createOpenRouter({
-    apiKey: OPENROUTER_API_KEY,
-  });
-  console.log("Openrouter created");
   try {
     const {
       messages,
@@ -131,12 +129,12 @@ app.post("/", async (c) => {
           },
           write_workflow: {
             description:
-              "Write a new n8n workflow to the active tab from a JSON string. Use when there is no existing workflow or you want to seed a new canvas.",
+              "Write a new n8n workflow to the active tab from a JSON string. The JSON must follow n8n's legacy connections format: connections is an object keyed by source node name; each value is an object keyed by outputType (e.g., 'main'); each value is an array of arrays of Connection objects where Connection = { node: string, type?: 'main' | string, index?: number }. Use when there is no existing workflow or you want to seed a new canvas.",
             inputSchema: z.object({
               workflowJson: z
                 .string()
                 .describe(
-                  "Stringified full workflow object to set in the n8n store."
+                  "Stringified full workflow object to set in the n8n store. Required shape: { nodes: Node[], connections: Record<string, Record<string, Connection[][]>> }."
                 ),
             }),
           },
@@ -178,6 +176,45 @@ app.post("/", async (c) => {
                 .describe(
                   "Modifications as JSON string with optional keys: nodes (array), connections (object), updateNode (object)"
                 ),
+            }),
+          },
+          get_node_info: {
+            description:
+              "Get detailed information about a node by id, including inbound and outbound connections.",
+            inputSchema: z.object({
+              nodeId: z
+                .string()
+                .describe("The id of the node to inspect (string id)."),
+            }),
+          },
+          get_error_nodes: {
+            description:
+              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          get_unavailable_nodes: {
+            description:
+              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          connect_nodes: {
+            description:
+              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
+            inputSchema: z.object({
+              from: z.object({
+                nodeId: z.string().describe("Source node id"),
+                outputType: z.string().optional(),
+                arrayIndex: z.number().optional(),
+              }),
+              to: z.object({
+                nodeId: z.string().describe("Target node id"),
+                inputType: z.string().optional(),
+                index: z.number().optional(),
+              }),
             }),
           },
         }
@@ -238,7 +275,7 @@ app.post("/", async (c) => {
           },
           modify_workflow: {
             description:
-              "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node.",
+              "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node. Connections must use legacy shape: outputType -> Array<Array<Connection>> where Connection = { node: string, type?: string, index?: number }.",
             inputSchema: z.object({
               modifications: z
                 .object({
@@ -247,10 +284,57 @@ app.post("/", async (c) => {
                   updateNode: z.record(z.string(), z.unknown()).optional(),
                 })
                 .describe(
-                  "Object with optional keys: nodes (array), connections (object), updateNode (object)."
+                  "Object with optional keys: nodes (array), connections (object in legacy shape), updateNode (object)."
                 ),
             }),
           },
+          get_node_info: {
+            description:
+              "Get detailed information about a node by id, including inbound and outbound connections.",
+            inputSchema: z.object({
+              nodeId: z
+                .string()
+                .describe("The id of the node to inspect (string id)."),
+            }),
+          },
+          get_error_nodes: {
+            description:
+              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          get_unavailable_nodes: {
+            description:
+              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
+            inputSchema: z.object({
+              toggle: z.boolean().default(true).describe("No-op flag"),
+            }),
+          },
+          connect_nodes: {
+            description:
+              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
+            inputSchema: z.object({
+              from: z.object({
+                nodeId: z.string().describe("Source node id"),
+                outputType: z.string().optional(),
+                arrayIndex: z.number().optional(),
+              }),
+              to: z.object({
+                nodeId: z.string().describe("Target node id"),
+                inputType: z.string().optional(),
+                index: z.number().optional(),
+              }),
+            }),
+          },
+          // askForConfirmation: {
+          //   description: "Ask the user for confirmation.",
+          //   inputSchema: z.object({
+          //     message: z
+          //       .string()
+          //       .describe("The message to ask for confirmation."),
+          //   }),
+          // },
           ...mcpTools,
         };
 
@@ -259,6 +343,7 @@ app.post("/", async (c) => {
     try {
       result = streamText({
         model: openrouter(model || "openai/gpt-5"),
+        // model: groq("qwen/qwen3-32b"),
         messages: convertToModelMessages(messages),
         experimental_transform: smoothStream({
           delayInMs: 20, // optional: defaults to 10ms
@@ -299,6 +384,7 @@ app.post("/", async (c) => {
           console.log("Generations incremented after user message");
         }
       },
+      sendReasoning: false,
     });
   } catch (error) {
     console.error("Error processing request:", error);
@@ -342,6 +428,3 @@ serve(
     console.log(`Server is running on http://localhost:${info.port}`);
   }
 );
-function createMCPClient(arg0: { transport: { type: string; url: string } }) {
-  throw new Error("Function not implemented.");
-}
