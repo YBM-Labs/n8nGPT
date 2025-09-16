@@ -7,6 +7,7 @@ import {
   experimental_createMCPClient,
   type UIMessage,
   generateId,
+  tool,
 } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { cors } from "hono/cors";
@@ -20,13 +21,7 @@ import { groq } from "@ai-sdk/groq";
 dotenv.config();
 
 const app = new Hono();
-const mcpClient = await experimental_createMCPClient({
-  transport: new StreamableHTTPClientTransport(
-    new URL(
-      `https://server.smithery.ai/@upstash/context7-mcp/mcp?api_key=${process.env.SMITHERY_API_KEY}`
-    )
-  ),
-});
+
 // better-auth routes
 app.all("/api/auth/**", async (c) => {
   return auth.handler(c.req.raw);
@@ -216,6 +211,87 @@ const fetchApiTool = {
   },
 };
 
+/**
+ * Fetch n8n docs by a fixed topic. Returns raw JSON from the docs API.
+ * This is used by docs_* tools only. Do not use for examples/templates.
+ */
+async function fetchDocs(topic: string): Promise<unknown> {
+  const response = await fetch(
+    `https://context7.com/api/v1/llmstxt/n8n_io_llms-full_txt?type=json&tokens=50000&topic=${encodeURIComponent(
+      topic
+    )}`,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.CONTEXT7_API_KEY}`,
+      },
+    }
+  );
+  const data: unknown = await response.json();
+  return data;
+}
+
+/**
+ * Factory to build a docs tool with a fixed query topic.
+ */
+function createDocsTool(description: string, topic: string) {
+  return tool({
+    description,
+    inputSchema: z.object({}),
+    execute: async () => fetchDocs(topic),
+  });
+}
+
+// Granular docs-only tools with hardcoded queries
+const docsListAllCoreNodes = createDocsTool(
+  "List all core nodes available in n8n (docs-only).",
+  "list all core nodes"
+);
+const docsListAllTriggerNodes = createDocsTool(
+  "List all trigger nodes (docs-only).",
+  "list all trigger nodes"
+);
+const docsListAllFlowControlNodes = createDocsTool(
+  "List all flow control nodes (docs-only).",
+  "list all flow control nodes"
+);
+const docsListAllAiAndLlmNodes = createDocsTool(
+  "List all AI and LLM nodes (docs-only).",
+  "list all AI and LLM nodes"
+);
+
+// Removed remaining docs tools to keep only four high-level categories
+// const docsListAllDataTransformationNodes = ...
+// const docsListAllHttpAndWebNodes = ...
+// const docsListOpenAiNodeDocs = ...
+// const docsListAllEmailNodes = ...
+// const docsListAllFileStorageNodes = ...
+// const docsListAllDatabaseNodes = ...
+// const docsListAllMessagingAndCollabNodes = ...
+
+// Templates search tool (templates only; not docs)
+const templatesSearch = tool({
+  description:
+    "Search community n8n templates by topic (templates only; not docs).",
+  inputSchema: z.object({
+    query: z
+      .string()
+      .min(1)
+      .describe("Topic or keywords to search templates, e.g., 'stock market'."),
+  }),
+  execute: async ({ query }) => {
+    const url = `https://context7.com/api/v1/enescingoz/awesome-n8n-templates?type=json&tokens=85722&topic=${encodeURIComponent(
+      query
+    )}`;
+    const headers: Record<string, string> = {};
+    if (process.env.CONTEXT7_API_KEY) {
+      headers["Authorization"] = `Bearer ${process.env.CONTEXT7_API_KEY}`;
+    }
+    const response = await fetch(url, { headers });
+    const data = await response.json();
+    return data;
+  },
+});
+
 app.post("/", async (c) => {
   console.log("Generation Request received");
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -253,257 +329,131 @@ app.post("/", async (c) => {
         400
       );
     }
-
-    // if (workflowJson) {
-    //   messages.push({
-    //     id: generateId(),
-    //     role: "system",
-    //     parts: [
-    //       {
-    //         type: "text",
-    //         text: "This is the current workflow present on the n8n canvas.",
-    //       },
-    //       {
-    //         type: "data-json",
-    //         data: workflowJson ?? "",
-    //       },
-    //     ],
-    //   });
-    // }
-
-    // console.log("workflowJson", workflowJson);
-    const mcpTools = await mcpClient.tools();
-
-    // Debug: Log the model being used and MCP tools structure
-    console.log("Using model:", model || "openai/gpt-5");
-    console.log("MCP tools count:", Object.keys(mcpTools).length);
-    console.log("Is Grok model:", model?.includes("grok") || false);
-
-    // Create tools object - use ultra-simplified version for Grok models
-    const isGrokModel = model?.includes("grok") || false;
-    const tools = isGrokModel
-      ? {
-          get_current_workflow: {
-            description:
-              "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
-            inputSchema: z.object({
-              toggle: z
-                .boolean()
-                .describe("The toggle to get the current workflow in n8n."),
-            }),
-          },
-          write_workflow: {
-            description:
-              "Write a new n8n workflow to the active tab from a JSON string. The JSON must follow n8n's legacy connections format: connections is an object keyed by source node name; each value is an object keyed by outputType (e.g., 'main'); each value is an array of arrays of Connection objects where Connection = { node: string, type?: 'main' | string, index?: number }. Use when there is no existing workflow or you want to seed a new canvas.",
-            inputSchema: z.object({
-              workflowJson: z
-                .string()
-                .describe(
-                  "Stringified full workflow object to set in the n8n store. Required shape: { nodes: Node[], connections: Record<string, Record<string, Connection[][]>> }."
-                ),
-            }),
-          },
-          delete_workflow: {
-            description:
-              "Delete/clear the current n8n workflow on the active tab, resetting the Pinia store and Vue Flow state to an empty workflow.",
-            inputSchema: z.object({
-              confirm: z
-                .boolean()
-                .describe(
-                  "Set to true to confirm deletion of current workflow."
-                ),
-            }),
-          },
-          add_node: {
-            description:
-              "Add a new node to the current n8n workflow at a given position with parameters.",
-            inputSchema: z.object({
-              nodeType: z.string().describe("The node's type"),
-              nodeName: z.string().describe("The node's display name"),
-              parameters: z.string().describe("Node parameters as JSON string"),
-              positionX: z.number().describe("X position on canvas"),
-              positionY: z.number().describe("Y position on canvas"),
-            }),
-          },
-          delete_node: {
-            description:
-              "Delete a node by id from the current n8n workflow and clean up connections.",
-            inputSchema: z.object({
-              nodeId: z.string().describe("The id of the node to delete"),
-            }),
-          },
-          modify_workflow: {
-            description:
-              "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node.",
-            inputSchema: z.object({
-              modifications: z
-                .string()
-                .describe(
-                  "Modifications as JSON string with optional keys: nodes (array), connections (object), updateNode (object)"
-                ),
-            }),
-          },
-          get_node_info: {
-            description:
-              "Get detailed information about a node by id, including inbound and outbound connections.",
-            inputSchema: z.object({
-              nodeId: z
-                .string()
-                .describe("The id of the node to inspect (string id)."),
-            }),
-          },
-          get_error_nodes: {
-            description:
-              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          get_unavailable_nodes: {
-            description:
-              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          connect_nodes: {
-            description:
-              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
-            inputSchema: z.object({
-              from: z.object({
-                nodeId: z.string().describe("Source node id"),
-                outputType: z.string().optional(),
-                arrayIndex: z.number().optional(),
-              }),
-              to: z.object({
-                nodeId: z.string().describe("Target node id"),
-                inputType: z.string().optional(),
-                index: z.number().optional(),
-              }),
-            }),
-          },
-        }
-      : {
-          get_current_workflow: {
-            description:
-              "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
-            inputSchema: z.object({
-              toggle: z
-                .boolean()
-                .describe("The toggle to get the current workflow in n8n."),
-            }),
-          },
-          // Local HTTP test tool for validating APIs before node creation/edits
-          fetch_api: fetchApiTool,
-          write_workflow: {
-            description:
-              "Write a new n8n workflow to the active tab from a JSON string. Use when there is no existing workflow or you want to seed a new canvas.",
-            inputSchema: z.object({
-              workflowJson: z
-                .string()
-                .describe(
-                  "Stringified full workflow object to set in the n8n store."
-                ),
-            }),
-          },
-          delete_workflow: {
-            description:
-              "Delete/clear the current n8n workflow on the active tab, resetting the Pinia store and Vue Flow state to an empty workflow.",
-            inputSchema: z.object({
-              confirm: z
-                .boolean()
-                .describe(
-                  "Set to true to confirm deletion of current workflow."
-                ),
-            }),
-          },
-          add_node: {
-            description:
-              "Add a new node to the current n8n workflow at a given position with parameters.",
-            inputSchema: z.object({
-              nodeType: z.string().describe("The node's type"),
-              nodeName: z.string().describe("The node's display name"),
-              parameters: z
-                .record(z.string(), z.unknown())
-                .default({})
-                .describe("Node parameters object"),
-              position: z
-                .tuple([z.number(), z.number()])
-                .default([0, 0])
-                .describe("[x, y] position on canvas"),
-            }),
-          },
-          delete_node: {
-            description:
-              "Delete a node by id from the current n8n workflow and clean up connections.",
-            inputSchema: z.object({
-              nodeId: z.string().describe("The id of the node to delete"),
-            }),
-          },
-          modify_workflow: {
-            description:
-              "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node. Connections must use legacy shape: outputType -> Array<Array<Connection>> where Connection = { node: string, type?: string, index?: number }.",
-            inputSchema: z.object({
-              modifications: z
-                .object({
-                  nodes: z.array(z.record(z.string(), z.unknown())).optional(),
-                  connections: z.record(z.string(), z.unknown()).optional(),
-                  updateNode: z.record(z.string(), z.unknown()).optional(),
-                })
-                .describe(
-                  "Object with optional keys: nodes (array), connections (object in legacy shape), updateNode (object)."
-                ),
-            }),
-          },
-          get_node_info: {
-            description:
-              "Get detailed information about a node by id, including inbound and outbound connections.",
-            inputSchema: z.object({
-              nodeId: z
-                .string()
-                .describe("The id of the node to inspect (string id)."),
-            }),
-          },
-          get_error_nodes: {
-            description:
-              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          get_unavailable_nodes: {
-            description:
-              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          connect_nodes: {
-            description:
-              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
-            inputSchema: z.object({
-              from: z.object({
-                nodeId: z.string().describe("Source node id"),
-                outputType: z.string().optional(),
-                arrayIndex: z.number().optional(),
-              }),
-              to: z.object({
-                nodeId: z.string().describe("Target node id"),
-                inputType: z.string().optional(),
-                index: z.number().optional(),
-              }),
-            }),
-          },
-          // askForConfirmation: {
-          //   description: "Ask the user for confirmation.",
-          //   inputSchema: z.object({
-          //     message: z
-          //       .string()
-          //       .describe("The message to ask for confirmation."),
-          //   }),
-          // },
-          ...mcpTools,
-        };
+    const tools = {
+      get_current_workflow: {
+        description:
+          "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
+        inputSchema: z.object({
+          toggle: z
+            .boolean()
+            .describe("The toggle to get the current workflow in n8n."),
+        }),
+      },
+      // Local HTTP test tool for validating APIs before node creation/edits
+      fetch_api: fetchApiTool,
+      // Docs-only tools with fixed queries (must be called first)
+      docs_list_all_core_nodes: docsListAllCoreNodes,
+      docs_list_all_trigger_nodes: docsListAllTriggerNodes,
+      docs_list_all_flow_control_nodes: docsListAllFlowControlNodes,
+      docs_list_all_ai_and_llm_nodes: docsListAllAiAndLlmNodes,
+      // Templates search tool (optional; not for docs)
+      templates_search: templatesSearch,
+      write_workflow: {
+        description:
+          "Write a new n8n workflow to the active tab from a JSON string. Use when there is no existing workflow or you want to seed a new canvas.",
+        inputSchema: z.object({
+          workflowJson: z
+            .string()
+            .describe(
+              "Stringified full workflow object to set in the n8n store."
+            ),
+        }),
+      },
+      delete_workflow: {
+        description:
+          "Delete/clear the current n8n workflow on the active tab, resetting the Pinia store and Vue Flow state to an empty workflow.",
+        inputSchema: z.object({
+          confirm: z
+            .boolean()
+            .describe("Set to true to confirm deletion of current workflow."),
+        }),
+      },
+      add_node: {
+        description:
+          "Add a new node to the current n8n workflow at a given position with parameters.",
+        inputSchema: z.object({
+          nodeType: z.string().describe("The node's type"),
+          nodeName: z.string().describe("The node's display name"),
+          parameters: z
+            .record(z.string(), z.unknown())
+            .default({})
+            .describe("Node parameters object"),
+          position: z
+            .tuple([z.number(), z.number()])
+            .default([0, 0])
+            .describe("[x, y] position on canvas"),
+        }),
+      },
+      delete_node: {
+        description:
+          "Delete a node by id from the current n8n workflow and clean up connections.",
+        inputSchema: z.object({
+          nodeId: z.string().describe("The id of the node to delete"),
+        }),
+      },
+      modify_workflow: {
+        description:
+          "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node. Connections must use legacy shape: outputType -> Array<Array<Connection>> where Connection = { node: string, type?: string, index?: number }.",
+        inputSchema: z.object({
+          modifications: z
+            .object({
+              nodes: z.array(z.record(z.string(), z.unknown())).optional(),
+              connections: z.record(z.string(), z.unknown()).optional(),
+              updateNode: z.record(z.string(), z.unknown()).optional(),
+            })
+            .describe(
+              "Object with optional keys: nodes (array), connections (object in legacy shape), updateNode (object)."
+            ),
+        }),
+      },
+      get_node_info: {
+        description:
+          "Get detailed information about a node by id, including inbound and outbound connections.",
+        inputSchema: z.object({
+          nodeId: z
+            .string()
+            .describe("The id of the node to inspect (string id)."),
+        }),
+      },
+      get_error_nodes: {
+        description:
+          "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
+        inputSchema: z.object({
+          toggle: z.boolean().default(true).describe("No-op flag"),
+        }),
+      },
+      get_unavailable_nodes: {
+        description:
+          "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
+        inputSchema: z.object({
+          toggle: z.boolean().default(true).describe("No-op flag"),
+        }),
+      },
+      connect_nodes: {
+        description:
+          "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
+        inputSchema: z.object({
+          from: z.object({
+            nodeId: z.string().describe("Source node id"),
+            outputType: z.string().optional(),
+            arrayIndex: z.number().optional(),
+          }),
+          to: z.object({
+            nodeId: z.string().describe("Target node id"),
+            inputType: z.string().optional(),
+            index: z.number().optional(),
+          }),
+        }),
+      },
+      // askForConfirmation: {
+      //   description: "Ask the user for confirmation.",
+      //   inputSchema: z.object({
+      //     message: z
+      //       .string()
+      //       .describe("The message to ask for confirmation."),
+      //   }),
+      // },
+    };
 
     // Try with tools first, fallback to no tools for Grok if it fails
     let result;
@@ -521,24 +471,7 @@ app.post("/", async (c) => {
         system: SYSTEM_PROMPT,
       });
     } catch (toolError) {
-      if (
-        isGrokModel &&
-        toolError instanceof Error &&
-        toolError.message.includes("Invalid function schema")
-      ) {
-        console.log("Grok model failed with tools, retrying without tools...");
-        result = streamText({
-          model: openrouter(model || "openai/gpt-5"),
-          messages: convertToModelMessages(messages),
-          experimental_transform: smoothStream({
-            delayInMs: 20, // optional: defaults to 10ms
-            chunking: "word", // optional: defaults to 'word'
-          }),
-          system: SYSTEM_PROMPT,
-        });
-      } else {
-        throw toolError;
-      }
+      throw toolError;
     }
 
     c.header("Content-Type", "text/plain; charset=utf-8");
