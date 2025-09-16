@@ -14,7 +14,7 @@ export default defineConfig({
       "clipboardWrite",
       "clipboardRead",
       "cookies",
-      // Dynamic permissions for n8n instances will be requested at runtime sda
+      // Dynamic permissions for n8n instances will be requested at runtime
     ],
     optional_host_permissions: ["https://*/*", "http://*/*"],
     content_security_policy: {

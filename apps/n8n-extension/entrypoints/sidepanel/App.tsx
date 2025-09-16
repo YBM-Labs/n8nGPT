@@ -3172,10 +3172,10 @@ export default function App() {
           <div className="flex h-[calc(100vh)] flex-col overflow-hidden bg-background/50 backdrop-blur-sm border border-border/50 shadow-lg">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 bg-card/30 backdrop-blur-sm">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center">
+                <div className="w-10 h-10 p-2 bg-black rounded-full flex items-center justify-center">
                   <img
                     src={logo}
-                    className="text-xs font-bold text-primary-foreground"
+                    className="text-xs font-bold text-primary-foreground object-cover"
                   />
                 </div>
                 <span className="text-sm font-semibold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
@@ -3253,19 +3253,13 @@ export default function App() {
                           from={message.role}
                           className="[&>div]:max-w-[88%] sm:[&>div]:max-w-[75%] [&>div]:min-w-0 [&>div]:overflow-hidden"
                         >
-                          <MessageContent>
+                          <MessageContent variant={"flat"}>
                             {parts.map((part, i) => {
                               if (isTextPart(part)) {
                                 return (
                                   <Response
                                     key={`${message.id}-${i}`}
-                                    className={cn(
-                                      "prose text-primary-foreground",
-                                      {
-                                        "prose-invert text-secondary-foreground":
-                                          message.role === "user",
-                                      }
-                                    )}
+                                    className={cn("prose prose-invert")}
                                   >
                                     {part.text}
                                   </Response>

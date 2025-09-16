@@ -51,6 +51,171 @@ const openrouter = createOpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY,
 });
 
+/**
+ * HTTP(S) API test tool used to pre-validate endpoints before creating or editing workflow nodes.
+ * Returns status, headers, and a truncated response preview. Supports query, headers, and body.
+ */
+const fetchApiParameters = z.object({
+  method: z
+    .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+    .describe("HTTP method to use."),
+  url: z.string().url().describe("Absolute HTTP(S) URL to call."),
+  headers: z
+    .record(z.string(), z.string())
+    .default({})
+    .describe("Optional request headers as key-value pairs."),
+  query: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .default({})
+    .describe("Optional query parameters to append to the URL."),
+  body: z
+    .union([z.string(), z.record(z.string(), z.unknown())])
+    .optional()
+    .describe(
+      "Optional request body as string or JSON object (for non-GET methods)."
+    ),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .max(120000)
+    .default(15000)
+    .describe("Request timeout in milliseconds (max 120000)."),
+  followRedirects: z
+    .boolean()
+    .default(true)
+    .describe(
+      "Whether to follow HTTP redirects (true) or return 3xx responses directly (false)."
+    ),
+});
+type FetchApiInput = z.infer<typeof fetchApiParameters>;
+
+const fetchApiTool = {
+  description:
+    "Perform an HTTP(S) request to test API endpoints before implementing nodes. Returns status, headers, and a truncated response preview.",
+  inputSchema: fetchApiParameters,
+  /**
+   * Execute the HTTP request with robust validation and timeouts.
+   */
+  execute: async ({
+    method,
+    url,
+    headers,
+    query,
+    body,
+    timeoutMs,
+    followRedirects,
+  }: FetchApiInput) => {
+    // Validate scheme early to avoid SSRF to non-HTTP(S) protocols
+    const parsedUrl = new URL(url);
+    const scheme = parsedUrl.protocol.toLowerCase();
+    if (scheme !== "http:" && scheme !== "https:") {
+      return {
+        ok: false,
+        error: "Only HTTP(S) URLs are allowed.",
+      };
+    }
+
+    // Append query parameters safely
+    const queryEntries = Object.entries(query);
+    for (const [key, value] of queryEntries) {
+      parsedUrl.searchParams.set(key, String(value));
+    }
+
+    // Prepare headers with case-insensitive keys preserved as provided
+    const requestHeaders: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers)) {
+      requestHeaders[k] = v;
+    }
+
+    // Prepare body
+    let requestBody: string | undefined = undefined;
+    if (typeof body === "string") {
+      requestBody = body;
+    } else if (body !== undefined) {
+      // JSON body: ensure Content-Type
+      if (
+        Object.keys(requestHeaders).find(
+          (h) => h.toLowerCase() === "content-type"
+        ) === undefined
+      ) {
+        requestHeaders["Content-Type"] = "application/json";
+      }
+      requestBody = JSON.stringify(body);
+    }
+
+    // Setup timeout via AbortController
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(parsedUrl.toString(), {
+        method,
+        headers: requestHeaders,
+        body: ["GET", "HEAD"].includes(method) ? undefined : requestBody,
+        redirect: followRedirects ? "follow" : "manual",
+        signal: controller.signal,
+      });
+
+      // Collect headers (at most first 25 to keep response compact)
+      const responseHeadersObj: Record<string, string> = {};
+      let headerCount = 0;
+      for (const [hk, hv] of response.headers.entries()) {
+        responseHeadersObj[hk] = hv;
+        headerCount += 1;
+        if (headerCount >= 25) break;
+      }
+
+      // Read body as text, attempt JSON parse for preview
+      const contentType = response.headers.get("content-type") ?? "";
+      const isJson = contentType.toLowerCase().includes("application/json");
+      const rawText = await response.text();
+      const maxChars = 5000;
+      const bodyPreview =
+        rawText.length > maxChars
+          ? `${rawText.slice(0, maxChars)}\n\n[truncated ${rawText.length - maxChars} chars]`
+          : rawText;
+
+      let jsonPreview: string | null = null;
+      if (isJson) {
+        try {
+          const parsed = JSON.parse(rawText) as unknown;
+          let preview = JSON.stringify(parsed, null, 2);
+          if (preview.length > maxChars) {
+            preview = `${preview.slice(0, maxChars)}\n\n[truncated ${preview.length - maxChars} chars]`;
+          }
+          jsonPreview = preview;
+        } catch {
+          jsonPreview = null;
+        }
+      }
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        url: response.url,
+        headers: responseHeadersObj,
+        contentType,
+        bodyPreview,
+        jsonPreview,
+      };
+    } catch (error) {
+      const isAbort = error instanceof Error && error.name === "AbortError";
+      return {
+        ok: false,
+        error: isAbort
+          ? `Request timed out after ${timeoutMs}ms`
+          : error instanceof Error
+            ? error.message
+            : "Unknown error",
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+};
+
 app.post("/", async (c) => {
   console.log("Generation Request received");
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -228,6 +393,8 @@ app.post("/", async (c) => {
                 .describe("The toggle to get the current workflow in n8n."),
             }),
           },
+          // Local HTTP test tool for validating APIs before node creation/edits
+          fetch_api: fetchApiTool,
           write_workflow: {
             description:
               "Write a new n8n workflow to the active tab from a JSON string. Use when there is no existing workflow or you want to seed a new canvas.",
@@ -344,7 +511,7 @@ app.post("/", async (c) => {
       result = streamText({
         model: openrouter("z-ai/glm-4.5:nitro"),
         // model: groq("qwen/qwen3-32b"),
-        messages: convertToModelMessages(messages),
+        messages: convertToModelMessages(messages.slice(-4)),
         experimental_transform: smoothStream({
           delayInMs: 10, // optional: defaults to 10ms
           chunking: "word", // optional: defaults to 'word'
