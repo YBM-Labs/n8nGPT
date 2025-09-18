@@ -1,0 +1,140 @@
+name: Backend CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_IMAGE: n8ngpt-backend
+  DOCKER_TAG: ${{ github.sha }}
+
+jobs:
+  test-and-build:
+    name: Test and Build Backend
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint backend
+        run: pnpm --filter n8ngpt-backend lint
+
+      - name: Type check backend
+        run: pnpm --filter n8ngpt-backend check-types
+
+      - name: Build backend
+        run: pnpm build:backend
+
+      - name: Upload backend dist
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: n8n-backend-dist
+          path: apps/n8n-backend/dist
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 7
+
+  docker-build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-to-ec2:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: docker-build-and-push
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script: |
+            # Login to Docker Hub
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+            # Stop and remove existing container
+            docker stop n8ngpt-backend || true
+            docker rm n8ngpt-backend || true
+
+            # Pull latest image
+            docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
+
+            # Run new container
+            docker run -d \
+              --name n8ngpt-backend \
+              --restart unless-stopped \
+              -p 5000:5000 \
+              -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+              -e OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}" \
+              -e SMITHERY_API_KEY="${{ secrets.SMITHERY_API_KEY }}" \
+              -e BETTER_AUTH_SECRET="${{ secrets.BETTER_AUTH_SECRET }}" \
+              -e BETTER_AUTH_URL="${{ secrets.BETTER_AUTH_URL }}" \
+              -e NODE_ENV=production \
+              ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
+
+            # Clean up old images
+            docker image prune -f
+
+            # Show running containers
+            docker ps

@@ -11,7 +11,8 @@
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types",
-    "prisma:studio": "cd apps/n8n-backend && pnpm prisma studio"
+    "prisma:studio": "cd apps/n8n-backend && pnpm prisma studio",
+    "start:backend": "cd apps/n8n-backend && pnpm start"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
