@@ -128,6 +128,8 @@ jobs:
               -e SMITHERY_API_KEY="${{ secrets.SMITHERY_API_KEY }}" \
               -e BETTER_AUTH_SECRET="${{ secrets.BETTER_AUTH_SECRET }}" \
               -e BETTER_AUTH_URL="${{ secrets.BETTER_AUTH_URL }}" \
+              -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
+              -e GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               -e NODE_ENV=production \
               ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
 
