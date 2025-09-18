@@ -1,5 +1,5 @@
 import { createAuthClient } from "better-auth/react";
 
 export const authClient = createAuthClient({
-  baseURL: "http://localhost:5000",
+  baseURL: import.meta.env.NODE_ENV === "dev" ? "http://localhost:5000" : "https://api.n8ngpt.ybmlabs.com",
 });

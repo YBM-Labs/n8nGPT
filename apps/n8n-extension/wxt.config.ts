@@ -19,7 +19,7 @@ export default defineConfig({
       extension_pages:
         "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
     },
-    // host_permissions: ["http://localhost:5000"],
+    host_permissions: ["https://api.n8ngpt.ybmlabs.com"],
   },
   vite: () => ({
     plugins: [tailwindcss()],
