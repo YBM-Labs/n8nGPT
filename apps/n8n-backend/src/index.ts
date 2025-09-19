@@ -1,4 +1,4 @@
-import "../instrumentation"; // Must be the first import
+import "../instrumentation.js"; // Must be the first import
 import dotenv from "dotenv";
 dotenv.config();
 import { serve } from "@hono/node-server";
