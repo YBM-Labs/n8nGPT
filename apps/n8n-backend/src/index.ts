@@ -33,7 +33,7 @@ app.all("/api/auth/**", async (c) => {
 });
 
 const EXTENSION_IDS = [""];
-const ALLOWED_ORIGINS = ["http://localhost:5000", ...EXTENSION_IDS];
+
 app.use(
   "/*",
   cors({

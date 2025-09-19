@@ -3092,7 +3092,7 @@ export default function App() {
                         </Message>
                       )}
                       {showBrainstorming && (
-                        <div className="ml-4 mt-2 mb-4 animate-in fade-in duration-300">
+                        <div className="mt-2 mb-4 animate-in fade-in duration-300">
                           <div className="flex items-center gap-3 w-fit px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
                             <Loader />
                             <span className="text-sm font-medium text-muted-foreground">
@@ -3159,7 +3159,7 @@ export default function App() {
                 )}
                 {(status === "submitted" || status !== "ready") &&
                   !generationError && (
-                    <div className="ml-4 mt-2 mb-4 animate-in fade-in duration-300">
+                    <div className="mt-2 mb-4 animate-in fade-in duration-300">
                       <div className="flex items-center gap-3 w-fit px-4 py-2 rounded-xl bg-muted/20 border border-border/30">
                         {" "}
                         <Loader />
