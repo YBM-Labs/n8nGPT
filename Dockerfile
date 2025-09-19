@@ -53,6 +53,9 @@ COPY --from=build /app/apps/n8n-backend ./apps/n8n-backend
 # Install only production dependencies
 RUN pnpm install --frozen-lockfile --prod
 
+# Generate Prisma client in production image
+RUN cd apps/n8n-backend && pnpm prisma generate
+
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nodejs -u 1001
@@ -71,5 +74,5 @@ WORKDIR /app/apps/n8n-backend
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:5000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
-# Prefer dist/src/index.js (TypeScript emits under src/), fallback to dist/index.js
-CMD ["sh", "-c", "node dist/src/index.js || node dist/index.js"]
+# Prefer dist/src/index.js (TypeScript emits under src/), fallback to dist/index.js only if file missing
+CMD ["sh", "-c", "if [ -f dist/src/index.js ]; then node dist/src/index.js; else node dist/index.js; fi"]
