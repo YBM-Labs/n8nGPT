@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Response } from "@/components/ai-elements/response";
 import { Loader } from "@/components/ai-elements/loader";
+import EmptyState from "@/components/ai-elements/empty-state";
 import {
   Source,
   Sources,
@@ -3000,7 +3001,7 @@ export default function App() {
                   />
                 </div>
                 <span className="text-sm font-semibold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
-                  N8N GPT
+                  n8nGPT
                 </span>
               </div>
               <div className=" flex items-center gap-1">
@@ -3032,8 +3033,15 @@ export default function App() {
                 </DropdownMenu>
               </div>
             </div>
+            {messages.length === 0 && status === "ready" && (
+              <EmptyState
+                onPrompt={(text) => {
+                  setInput(text);
+                }}
+              />
+            )}
             <Conversation className="h-full">
-              <ConversationContent className="pb-24">
+              <ConversationContent className="pb-24 h-full">
                 {messages.map((message, messageIndex) => {
                   const parts = Array.isArray(
                     (message as { parts?: unknown[] }).parts
