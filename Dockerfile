@@ -28,6 +28,9 @@ FROM base AS build
 # Build the backend
 RUN pnpm build:backend
 
+# Verify build output
+RUN ls -la /app/apps/n8n-backend/dist/
+
 # Production stage
 FROM node:20-alpine AS production
 
@@ -43,17 +46,11 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 # Copy workspace packages
 COPY packages/ ./packages/
 
-# Copy backend app
-COPY apps/n8n-backend/ ./apps/n8n-backend/
+# Copy the entire built backend app from build stage
+COPY --from=build /app/apps/n8n-backend ./apps/n8n-backend
 
 # Install only production dependencies
 RUN pnpm install --frozen-lockfile --prod
-
-# Generate Prisma client
-RUN cd apps/n8n-backend && pnpm prisma generate
-
-# Copy built application from build stage
-COPY --from=build /app/apps/n8n-backend/dist ./apps/n8n-backend/dist
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
@@ -66,4 +63,7 @@ USER nodejs
 # Expose port
 EXPOSE 5000
 
-CMD ["pnpm", "start:backend"]
+# Set working directory to backend app
+WORKDIR /app/apps/n8n-backend
+
+CMD ["node", "dist/index.js"]
