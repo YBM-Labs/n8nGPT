@@ -1,3 +1,6 @@
+import "../instrumentation"; // Must be the first import
+import dotenv from "dotenv";
+dotenv.config();
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import {
@@ -11,13 +14,11 @@ import {
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import dotenv from "dotenv";
 import { auth } from "./lib/auth.js";
 import { getGenerations, incrementGenerations } from "./lib/generations.js";
 import { loadSystemPromptText } from "./utils/helperFunctions.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { groq } from "@ai-sdk/groq";
-dotenv.config();
+import { LangfuseClient } from "@langfuse/client";
 
 const app = new Hono();
 const mcpClient = await experimental_createMCPClient({
@@ -43,9 +44,6 @@ app.use(
     credentials: false,
   })
 );
-
-// Load once at startup to avoid reading from disk on every request
-const SYSTEM_PROMPT: string = loadSystemPromptText();
 
 const openrouter = createOpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY,
@@ -216,6 +214,9 @@ const fetchApiTool = {
   },
 };
 
+// Initialize the Langfuse client
+const langfuse = new LangfuseClient();
+
 app.post("/", async (c) => {
   console.log("Generation Request received");
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -239,9 +240,11 @@ app.post("/", async (c) => {
     const {
       messages,
       model,
+      chatId,
       // workflowJson,
     }: {
       messages: UIMessage[];
+      chatId: string;
       model?: string;
 
       // workflowJson?: string
@@ -507,7 +510,10 @@ app.post("/", async (c) => {
 
     // Try with tools first, fallback to no tools for Grok if it fails
     let result;
+
+    const SYSTEM_PROMPT = await langfuse.prompt.get("SYSTEM_PROMPT");
     try {
+      // Get production prompt
       result = streamText({
         model: openrouter("z-ai/glm-4.5:nitro"),
         // model: groq("qwen/qwen3-32b"),
@@ -516,9 +522,12 @@ app.post("/", async (c) => {
           delayInMs: 10, // optional: defaults to 10ms
           chunking: "word", // optional: defaults to 'word'
         }),
+        experimental_telemetry: {
+          isEnabled: true,
+        },
         // toolChoice: "required",
         tools, // Include tools for all models
-        system: SYSTEM_PROMPT,
+        system: SYSTEM_PROMPT.prompt,
       });
     } catch (toolError) {
       if (
@@ -534,7 +543,8 @@ app.post("/", async (c) => {
             delayInMs: 20, // optional: defaults to 10ms
             chunking: "word", // optional: defaults to 'word'
           }),
-          system: SYSTEM_PROMPT,
+
+          system: SYSTEM_PROMPT.prompt,
         });
       } else {
         throw toolError;
