@@ -21,13 +21,26 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { LangfuseClient } from "@langfuse/client";
 
 const app = new Hono();
-const mcpClient = await experimental_createMCPClient({
-  transport: new StreamableHTTPClientTransport(
-    new URL(
-      `https://server.smithery.ai/@upstash/context7-mcp/mcp?api_key=${process.env.SMITHERY_API_KEY}`
-    )
-  ),
-});
+
+// Initialize MCP client with error handling
+let mcpClient: any = null;
+try {
+  if (process.env.SMITHERY_API_KEY) {
+    mcpClient = await experimental_createMCPClient({
+      transport: new StreamableHTTPClientTransport(
+        new URL(
+          `https://server.smithery.ai/@upstash/context7-mcp/mcp?api_key=${process.env.SMITHERY_API_KEY}`
+        )
+      ),
+    });
+    console.log("MCP client initialized successfully");
+  } else {
+    console.warn("SMITHERY_API_KEY not found, MCP client disabled");
+  }
+} catch (error) {
+  console.error("Failed to initialize MCP client:", error);
+  console.warn("Continuing without MCP client");
+}
 // better-auth routes
 app.all("/api/auth/**", async (c) => {
   return auth.handler(c.req.raw);
@@ -45,9 +58,20 @@ app.use(
   })
 );
 
-const openrouter = createOpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY,
-});
+// Initialize OpenRouter with error handling
+let openrouter: any = null;
+try {
+  if (process.env.OPENROUTER_API_KEY) {
+    openrouter = createOpenRouter({
+      apiKey: process.env.OPENROUTER_API_KEY,
+    });
+    console.log("OpenRouter client initialized successfully");
+  } else {
+    console.error("OPENROUTER_API_KEY not found, OpenRouter client disabled");
+  }
+} catch (error) {
+  console.error("Failed to initialize OpenRouter client:", error);
+}
 
 /**
  * HTTP(S) API test tool used to pre-validate endpoints before creating or editing workflow nodes.
@@ -214,8 +238,15 @@ const fetchApiTool = {
   },
 };
 
-// Initialize the Langfuse client
-const langfuse = new LangfuseClient();
+// Initialize the Langfuse client with error handling
+let langfuse: any = null;
+try {
+  langfuse = new LangfuseClient();
+  console.log("Langfuse client initialized successfully");
+} catch (error) {
+  console.error("Failed to initialize Langfuse client:", error);
+  console.warn("Continuing without Langfuse client");
+}
 
 app.post("/", async (c) => {
   console.log("Generation Request received");
@@ -275,7 +306,7 @@ app.post("/", async (c) => {
     // }
 
     // console.log("workflowJson", workflowJson);
-    const mcpTools = await mcpClient.tools();
+    const mcpTools = mcpClient ? await mcpClient.tools() : {};
 
     // Debug: Log the model being used and MCP tools structure
     console.log("Using model:", model || "openai/gpt-5");
@@ -511,7 +542,13 @@ app.post("/", async (c) => {
     // Try with tools first, fallback to no tools for Grok if it fails
     let result;
 
-    const SYSTEM_PROMPT = await langfuse.prompt.get("SYSTEM_PROMPT");
+    if (!openrouter) {
+      return c.json({ error: "OpenRouter API key not configured" }, 500);
+    }
+
+    const SYSTEM_PROMPT = langfuse
+      ? await langfuse.prompt.get("SYSTEM_PROMPT")
+      : { prompt: "You are a helpful AI assistant." };
     try {
       // Get production prompt
       result = streamText({
