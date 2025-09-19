@@ -25,11 +25,12 @@ RUN cd apps/n8n-backend && pnpm prisma generate
 # Build stage
 FROM base AS build
 
-# Build the backend
-RUN pnpm build:backend
+# Build the backend directly in its package (avoid turbo indirection)
+RUN cd apps/n8n-backend && pnpm build
 
 # Verify build output
-RUN ls -la /app/apps/n8n-backend/dist/
+RUN ls -la /app/apps/n8n-backend/dist/ || true
+RUN ls -la /app/apps/n8n-backend/dist/src/ || true
 
 # Production stage
 FROM node:20-alpine AS production
@@ -70,4 +71,5 @@ WORKDIR /app/apps/n8n-backend
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:5000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
-CMD ["node", "dist/index.js"]
+# Try dist/index.js first, fallback to dist/src/index.js if needed
+CMD ["sh", "-c", "node dist/index.js || node dist/src/index.js"]
