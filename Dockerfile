@@ -55,9 +55,6 @@ RUN cd apps/n8n-backend && pnpm prisma generate
 # Copy built application from build stage
 COPY --from=build /app/apps/n8n-backend/dist ./apps/n8n-backend/dist
 
-# Copy SYSTEM_PROMPT.txt to dist folder
-COPY apps/n8n-backend/src/SYSTEM_PROMPT.txt ./apps/n8n-backend/dist/
-
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nodejs -u 1001
