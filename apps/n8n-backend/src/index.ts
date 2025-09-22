@@ -311,113 +311,9 @@ app.post("/", async (c) => {
     // Debug: Log the model being used and MCP tools structure
     console.log("Using model:", model || "openai/gpt-5");
     console.log("MCP tools count:", Object.keys(mcpTools).length);
-    console.log("Is Grok model:", model?.includes("grok") || false);
 
     // Create tools object - use ultra-simplified version for Grok models
-    const isGrokModel = model?.includes("grok") || false;
-    const tools = isGrokModel
-      ? {
-          get_current_workflow: {
-            description:
-              "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
-            inputSchema: z.object({
-              toggle: z
-                .boolean()
-                .describe("The toggle to get the current workflow in n8n."),
-            }),
-          },
-          write_workflow: {
-            description:
-              "Write a new n8n workflow to the active tab from a JSON string. The JSON must follow n8n's legacy connections format: connections is an object keyed by source node name; each value is an object keyed by outputType (e.g., 'main'); each value is an array of arrays of Connection objects where Connection = { node: string, type?: 'main' | string, index?: number }. Use when there is no existing workflow or you want to seed a new canvas.",
-            inputSchema: z.object({
-              workflowJson: z
-                .string()
-                .describe(
-                  "Stringified full workflow object to set in the n8n store. Required shape: { nodes: Node[], connections: Record<string, Record<string, Connection[][]>> }."
-                ),
-            }),
-          },
-          delete_workflow: {
-            description:
-              "Delete/clear the current n8n workflow on the active tab, resetting the Pinia store and Vue Flow state to an empty workflow.",
-            inputSchema: z.object({
-              confirm: z
-                .boolean()
-                .describe(
-                  "Set to true to confirm deletion of current workflow."
-                ),
-            }),
-          },
-          add_node: {
-            description:
-              "Add a new node to the current n8n workflow at a given position with parameters.",
-            inputSchema: z.object({
-              nodeType: z.string().describe("The node's type"),
-              nodeName: z.string().describe("The node's display name"),
-              parameters: z.string().describe("Node parameters as JSON string"),
-              positionX: z.number().describe("X position on canvas"),
-              positionY: z.number().describe("Y position on canvas"),
-            }),
-          },
-          delete_node: {
-            description:
-              "Delete a node by id from the current n8n workflow and clean up connections.",
-            inputSchema: z.object({
-              nodeId: z.string().describe("The id of the node to delete"),
-            }),
-          },
-          modify_workflow: {
-            description:
-              "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node.",
-            inputSchema: z.object({
-              modifications: z
-                .string()
-                .describe(
-                  "Modifications as JSON string with optional keys: nodes (array), connections (object), updateNode (object)"
-                ),
-            }),
-          },
-          get_node_info: {
-            description:
-              "Get detailed information about a node by id, including inbound and outbound connections.",
-            inputSchema: z.object({
-              nodeId: z
-                .string()
-                .describe("The id of the node to inspect (string id)."),
-            }),
-          },
-          get_error_nodes: {
-            description:
-              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          get_unavailable_nodes: {
-            description:
-              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          connect_nodes: {
-            description:
-              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
-            inputSchema: z.object({
-              from: z.object({
-                nodeId: z.string().describe("Source node id"),
-                outputType: z.string().optional(),
-                arrayIndex: z.number().optional(),
-              }),
-              to: z.object({
-                nodeId: z.string().describe("Target node id"),
-                inputType: z.string().optional(),
-                index: z.number().optional(),
-              }),
-            }),
-          },
-        }
-      : {
+    const tools = {
           get_current_workflow: {
             description:
               "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
@@ -536,7 +432,7 @@ app.post("/", async (c) => {
           //       .describe("The message to ask for confirmation."),
           //   }),
           // },
-          ...mcpTools,
+          // ...mcpTools,
         };
 
     // Try with tools first, fallback to no tools for Grok if it fails
@@ -568,7 +464,6 @@ app.post("/", async (c) => {
       });
     } catch (toolError) {
       if (
-        isGrokModel &&
         toolError instanceof Error &&
         toolError.message.includes("Invalid function schema")
       ) {
