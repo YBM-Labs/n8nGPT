@@ -314,126 +314,124 @@ app.post("/", async (c) => {
 
     // Create tools object - use ultra-simplified version for Grok models
     const tools = {
-          get_current_workflow: {
-            description:
-              "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
-            inputSchema: z.object({
-              toggle: z
-                .boolean()
-                .describe("The toggle to get the current workflow in n8n."),
-            }),
-          },
-          // Local HTTP test tool for validating APIs before node creation/edits
-          fetch_api: fetchApiTool,
-          write_workflow: {
-            description:
-              "Write a new n8n workflow to the active tab from a JSON string. Use when there is no existing workflow or you want to seed a new canvas.",
-            inputSchema: z.object({
-              workflowJson: z
-                .string()
-                .describe(
-                  "Stringified full workflow object to set in the n8n store."
-                ),
-            }),
-          },
-          delete_workflow: {
-            description:
-              "Delete/clear the current n8n workflow on the active tab, resetting the Pinia store and Vue Flow state to an empty workflow.",
-            inputSchema: z.object({
-              confirm: z
-                .boolean()
-                .describe(
-                  "Set to true to confirm deletion of current workflow."
-                ),
-            }),
-          },
-          add_node: {
-            description:
-              "Add a new node to the current n8n workflow at a given position with parameters.",
-            inputSchema: z.object({
-              nodeType: z.string().describe("The node's type"),
-              nodeName: z.string().describe("The node's display name"),
-              parameters: z
-                .record(z.string(), z.unknown())
-                .default({})
-                .describe("Node parameters object"),
-              position: z
-                .tuple([z.number(), z.number()])
-                .default([0, 0])
-                .describe("[x, y] position on canvas"),
-            }),
-          },
-          delete_node: {
-            description:
-              "Delete a node by id from the current n8n workflow and clean up connections.",
-            inputSchema: z.object({
-              nodeId: z.string().describe("The id of the node to delete"),
-            }),
-          },
-          modify_workflow: {
-            description:
-              "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node. Connections must use legacy shape: outputType -> Array<Array<Connection>> where Connection = { node: string, type?: string, index?: number }.",
-            inputSchema: z.object({
-              modifications: z
-                .object({
-                  nodes: z.array(z.record(z.string(), z.unknown())).optional(),
-                  connections: z.record(z.string(), z.unknown()).optional(),
-                  updateNode: z.record(z.string(), z.unknown()).optional(),
-                })
-                .describe(
-                  "Object with optional keys: nodes (array), connections (object in legacy shape), updateNode (object)."
-                ),
-            }),
-          },
-          get_node_info: {
-            description:
-              "Get detailed information about a node by id, including inbound and outbound connections.",
-            inputSchema: z.object({
-              nodeId: z
-                .string()
-                .describe("The id of the node to inspect (string id)."),
-            }),
-          },
-          get_error_nodes: {
-            description:
-              "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          get_unavailable_nodes: {
-            description:
-              "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
-            inputSchema: z.object({
-              toggle: z.boolean().default(true).describe("No-op flag"),
-            }),
-          },
-          connect_nodes: {
-            description:
-              "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
-            inputSchema: z.object({
-              from: z.object({
-                nodeId: z.string().describe("Source node id"),
-                outputType: z.string().optional(),
-                arrayIndex: z.number().optional(),
-              }),
-              to: z.object({
-                nodeId: z.string().describe("Target node id"),
-                inputType: z.string().optional(),
-                index: z.number().optional(),
-              }),
-            }),
-          },
-          // askForConfirmation: {
-          //   description: "Ask the user for confirmation.",
-          //   inputSchema: z.object({
-          //     message: z
-          //       .string()
-          //       .describe("The message to ask for confirmation."),
-          //   }),
-          // },
-          // ...mcpTools,
-        };
+      get_current_workflow: {
+        description:
+          "Retrieve the active n8n workflow from the current browser tab by reading the Vue/Pinia store and return it in a simplified export JSON (nodes, connections, pinData, meta). Use this to inspect the canvas state before planning modifications.",
+        inputSchema: z.object({
+          toggle: z
+            .boolean()
+            .describe("The toggle to get the current workflow in n8n."),
+        }),
+      },
+      // Local HTTP test tool for validating APIs before node creation/edits
+      fetch_api: fetchApiTool,
+      write_workflow: {
+        description:
+          "Write a new n8n workflow to the active tab from a JSON string. Use when there is no existing workflow or you want to seed a new canvas.",
+        inputSchema: z.object({
+          workflowJson: z
+            .string()
+            .describe(
+              "Stringified full workflow object to set in the n8n store."
+            ),
+        }),
+      },
+      delete_workflow: {
+        description:
+          "Delete/clear the current n8n workflow on the active tab, resetting the Pinia store and Vue Flow state to an empty workflow.",
+        inputSchema: z.object({
+          confirm: z
+            .boolean()
+            .describe("Set to true to confirm deletion of current workflow."),
+        }),
+      },
+      add_node: {
+        description:
+          "Add a new node to the current n8n workflow at a given position with parameters.",
+        inputSchema: z.object({
+          nodeType: z.string().describe("The node's type"),
+          nodeName: z.string().describe("The node's display name"),
+          parameters: z
+            .record(z.string(), z.unknown())
+            .default({})
+            .describe("Node parameters object"),
+          position: z
+            .tuple([z.number(), z.number()])
+            .default([0, 0])
+            .describe("[x, y] position on canvas"),
+        }),
+      },
+      delete_node: {
+        description:
+          "Delete a node by id from the current n8n workflow and clean up connections.",
+        inputSchema: z.object({
+          nodeId: z.string().describe("The id of the node to delete"),
+        }),
+      },
+      modify_workflow: {
+        description:
+          "Modify the current n8n workflow. Supports adding nodes, updating connections, or updating a node. Connections must use legacy shape: outputType -> Array<Array<Connection>> where Connection = { node: string, type?: string, index?: number }.",
+        inputSchema: z.object({
+          modifications: z
+            .object({
+              nodes: z.array(z.record(z.string(), z.unknown())).optional(),
+              connections: z.record(z.string(), z.unknown()).optional(),
+              updateNode: z.record(z.string(), z.unknown()).optional(),
+            })
+            .describe(
+              "Object with optional keys: nodes (array), connections (object in legacy shape), updateNode (object)."
+            ),
+        }),
+      },
+      get_node_info: {
+        description:
+          "Get detailed information about a node by id, including inbound and outbound connections.",
+        inputSchema: z.object({
+          nodeId: z
+            .string()
+            .describe("The id of the node to inspect (string id)."),
+        }),
+      },
+      get_error_nodes: {
+        description:
+          "List nodes currently showing issues in the UI (e.g., error state). Returns id, name, type, position and issue messages.",
+        inputSchema: z.object({
+          toggle: z.boolean().default(true).describe("No-op flag"),
+        }),
+      },
+      get_unavailable_nodes: {
+        description:
+          "List nodes whose types appear unavailable on this instance (best-effort heuristic).",
+        inputSchema: z.object({
+          toggle: z.boolean().default(true).describe("No-op flag"),
+        }),
+      },
+      connect_nodes: {
+        description:
+          "Connect two nodes by id. Defaults: outputType 'main', arrayIndex 0, inputType 'main', index 0.",
+        inputSchema: z.object({
+          from: z.object({
+            nodeId: z.string().describe("Source node id"),
+            outputType: z.string().optional(),
+            arrayIndex: z.number().optional(),
+          }),
+          to: z.object({
+            nodeId: z.string().describe("Target node id"),
+            inputType: z.string().optional(),
+            index: z.number().optional(),
+          }),
+        }),
+      },
+      // askForConfirmation: {
+      //   description: "Ask the user for confirmation.",
+      //   inputSchema: z.object({
+      //     message: z
+      //       .string()
+      //       .describe("The message to ask for confirmation."),
+      //   }),
+      // },
+      // ...mcpTools,
+    };
 
     // Try with tools first, fallback to no tools for Grok if it fails
     let result;
