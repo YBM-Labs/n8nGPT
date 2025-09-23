@@ -11,7 +11,6 @@ export default defineConfig({
       "tabs",
       "scripting",
       "activeTab",
-      "cookies",
       // Dynamic permissions for n8n instances will be requested at runtime
     ],
     optional_host_permissions: ["https://*/*", "http://*/*"],
@@ -19,7 +18,7 @@ export default defineConfig({
       extension_pages:
         "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
     },
-    host_permissions: ["https://api.n8ngpt.ybmlabs.com/*"], //
+    host_permissions: ["https://api.n8ngpt.ybmlabs.com/*"],
   },
   vite: () => ({
     plugins: [tailwindcss()],

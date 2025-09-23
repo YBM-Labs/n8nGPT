@@ -2987,9 +2987,11 @@ export default function App() {
 
   return (
     <div className="size-full min-h-screen bg-gradient-to-br from-background via-background to-background/95 text-foreground">
-      <div className="mx-auto size-full max-w-3xl">
+      <div className="mx-auto  size-full max-w-3xl">
         {!session ? (
-          <AuthPanel />
+          <div className="flex items-center justify-center px-4 py-8 max-w-md mx-auto w-full">
+            <AuthPanel />
+          </div>
         ) : (
           <div className="flex h-[calc(100vh)] flex-col overflow-hidden bg-background/50 backdrop-blur-sm border border-border/50 shadow-lg">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 bg-card/30 backdrop-blur-sm">

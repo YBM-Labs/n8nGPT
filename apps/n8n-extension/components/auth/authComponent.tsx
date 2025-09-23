@@ -1,5 +1,7 @@
 import { authClient } from "@/lib/auth-client";
 import { useState, useEffect } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { browser } from "wxt/browser";
 
 export default function AuthPanel() {
@@ -10,6 +12,9 @@ export default function AuthPanel() {
   const [showForm, setShowForm] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [awaitingOtp, setAwaitingOtp] = useState(false);
   const { data: session, isPending } = authClient.useSession();
 
   // Animate form entrance
@@ -17,7 +22,6 @@ export default function AuthPanel() {
     const timer = setTimeout(() => setShowForm(true), 300);
     return () => clearTimeout(timer);
   }, []);
-
 
   // Form validation
   const validateEmail = (email: string) => {
@@ -60,9 +64,16 @@ export default function AuthPanel() {
         name: email.split("@")[0] || "user",
       });
 
-      setMessage(
-        error ? `Sign up failed: ${error.message}` : "Sign up successful! 🎉"
-      );
+      if (error) {
+        setMessage(`Sign up failed: ${error.message}`);
+      } else {
+        // Server (email-otp plugin) overrides default email verification
+        // and sends OTP automatically when verification is required.
+        setAwaitingOtp(true);
+        setMessage(
+          "We sent a verification code to your email. Enter it below."
+        );
+      }
     } catch (err) {
       setMessage("An unexpected error occurred");
     } finally {
@@ -83,6 +94,51 @@ export default function AuthPanel() {
       );
     } catch (err) {
       setMessage("An unexpected error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const verifyEmailWithOtp = async () => {
+    if (!validateEmail(email)) return;
+    if (!otp || otp.length < 4) {
+      setMessage("Enter the verification code we emailed you");
+      return;
+    }
+
+    setIsLoading(true);
+    setMessage("");
+    try {
+      const { data, error } = await authClient.emailOtp.verifyEmail({
+        email,
+        otp,
+      });
+      if (error) {
+        setMessage(error.message ?? "Verification failed");
+      } else if (data?.status) {
+        setMessage("Email verified! Signing you in...");
+        setAwaitingOtp(false);
+        // Automatically sign in using the provided password
+        try {
+          const { error: signInError } = await authClient.signIn.email({
+            email,
+            password,
+          });
+          if (signInError) {
+            setMessage(
+              signInError.message ?? "Signed in failed after verification"
+            );
+          } else {
+            setMessage("");
+          }
+        } catch (e) {
+          setMessage("Signed in failed after verification");
+        }
+      } else {
+        setMessage("Invalid or expired code");
+      }
+    } catch (e) {
+      setMessage("Verification failed");
     } finally {
       setIsLoading(false);
     }
@@ -152,145 +208,218 @@ export default function AuthPanel() {
   }
 
   return (
-    <div className="p-6 space-y-6 flex flex-col items-center max-w-md mx-auto min-h-[400px]">
-      {/* Header with gradient text */}
-      <div className="text-center space-y-2 animate-in fade-in slide-in-from-top-4 duration-700">
-        <h1 className="font-bold text-3xl bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
-          Welcome to n8n GPT
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Sign in to access your workflow automation
-        </p>
-      </div>
-
-      {/* Loading indicator */}
-      {isPending && (
-        <div className="flex items-center justify-center py-8">
-          <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+    <div className="flex items-center justify-center px-4 py-8 max-w-md mx-auto w-full">
+      <div className="w-full rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm shadow-lg p-6">
+        {/* Header with gradient text */}
+        <div className="text-center space-y-2 animate-in fade-in slide-in-from-top-4 duration-700">
+          <h1 className="font-bold text-2xl bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+            Welcome to n8nGPT
+          </h1>
+          <p className="text-muted-foreground text-sm">Sign in to continue</p>
         </div>
-      )}
 
-      {/* Auth Form */}
-      {!isPending && (
-        <div
-          className={`w-full space-y-4 transition-all duration-500 ease-out ${
-            showForm ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-          }`}
-        >
-          {/* Email Input */}
-          <div className="space-y-1">
-            <input
-              className={`w-full rounded-xl border px-4 py-3 text-base bg-background/50 backdrop-blur-sm
-                transition-all duration-200 ease-in-out
-                focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary
-                hover:border-primary/50 hover:bg-background/80
-                ${emailError ? "border-destructive focus:ring-destructive/50" : "border-border"}
-              `}
-              type="email"
-              placeholder="Enter your email"
-              value={email}
-              onChange={handleEmailChange}
-              disabled={isLoading}
-            />
-            {emailError && (
-              <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                {emailError}
-              </p>
-            )}
+        {/* Loading indicator */}
+        {isPending && (
+          <div className="flex items-center justify-center py-8">
+            <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
           </div>
+        )}
 
-          {/* Password Input */}
-          <div className="space-y-1">
-            <input
-              className={`w-full rounded-xl border px-4 py-3 text-base bg-background/50 backdrop-blur-sm
-                transition-all duration-200 ease-in-out
-                focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary
-                hover:border-primary/50 hover:bg-background/80
-                ${passwordError ? "border-destructive focus:ring-destructive/50" : "border-border"}
-              `}
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={handlePasswordChange}
-              disabled={isLoading}
-            />
-            {passwordError && (
-              <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                {passwordError}
-              </p>
+        {/* Auth Form */}
+        {!isPending && (
+          <div
+            className={`mt-6 space-y-4 transition-all duration-500 ease-out ${
+              showForm ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
+          >
+            {/* Email */}
+            <div className="space-y-2">
+              <label htmlFor="email" className="text-sm text-foreground/90">
+                Email
+              </label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={handleEmailChange}
+                disabled={isLoading}
+                aria-invalid={!!emailError}
+              />
+              {emailError && (
+                <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {emailError}
+                </p>
+              )}
+            </div>
+
+            {/* Password */}
+            <div className="space-y-2">
+              <label htmlFor="password" className="text-sm text-foreground/90">
+                Password
+              </label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={handlePasswordChange}
+                  disabled={isLoading}
+                  aria-invalid={!!passwordError}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") signIn();
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-2 my-auto h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+              {passwordError && (
+                <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {passwordError}
+                </p>
+              )}
+            </div>
+
+            {/* OTP verification block (shown after sign-up) */}
+            {awaitingOtp && (
+              <div className="space-y-2">
+                <label htmlFor="otp" className="text-sm text-foreground/90">
+                  Verification code
+                </label>
+                <Input
+                  id="otp"
+                  inputMode="numeric"
+                  placeholder="Enter the 6-digit code"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                  disabled={isLoading}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") verifyEmailWithOtp();
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-9 text-xs"
+                    disabled={isLoading}
+                    onClick={async () => {
+                      try {
+                        await authClient.emailOtp.sendVerificationOtp({
+                          email,
+                          type: "email-verification",
+                        });
+                        setMessage("Code resent");
+                      } catch {
+                        setMessage("Could not resend code");
+                      }
+                    }}
+                  >
+                    Resend code
+                  </Button>
+                </div>
+              </div>
             )}
-          </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-col w-full gap-3 pt-2">
-            <button
-              className={`relative font-medium rounded-xl px-4 py-3 w-full transition-all duration-200 ease-in-out
-                overflow-hidden group
-                ${
-                  isLoading
-                    ? "bg-muted text-muted-foreground cursor-not-allowed"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
-                }
-              `}
-              onClick={signIn}
-              disabled={isLoading}
-            >
-              <span className="relative z-10 flex items-center justify-center gap-2">
-                {isLoading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-current/20 border-t-current rounded-full animate-spin"></div>
-                    Signing in...
-                  </>
-                ) : (
-                  "Sign In"
-                )}
+            {/* Primary actions */}
+            <div className="pt-1 grid grid-cols-1 gap-2">
+              {!awaitingOtp ? (
+                <>
+                  <Button
+                    className="h-10 text-sm"
+                    onClick={signIn}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-current/20 border-t-current rounded-full animate-spin" />
+                        Signing in...
+                      </span>
+                    ) : (
+                      "Sign In"
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-10 text-sm"
+                    onClick={signUp}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? "Creating account..." : "Create Account"}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  className="h-10 text-sm"
+                  onClick={verifyEmailWithOtp}
+                  disabled={isLoading}
+                >
+                  Verify email
+                </Button>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="relative text-center py-1">
+              <span className="relative z-10 bg-card/60 px-2 text-xs text-muted-foreground">
+                or
               </span>
-              <div className="absolute inset-0 bg-gradient-to-r from-primary to-primary/80 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
-            </button>
+              <div className="absolute left-0 right-0 top-1/2 -z-0 h-px bg-border" />
+            </div>
 
-            <button
-              className={`font-medium rounded-xl border px-4 py-3 w-full transition-all duration-200 ease-in-out
-                ${
-                  isLoading
-                    ? "border-muted text-muted-foreground cursor-not-allowed"
-                    : "border-border text-foreground hover:border-primary hover:bg-primary/5 hover:scale-[1.02] active:scale-[0.98]"
-                }
-              `}
-              onClick={signUp}
-              disabled={isLoading}
-            >
-              {isLoading ? "Creating account..." : "Create Account"}
-            </button>
-
-            <button
-              className={`font-medium rounded-xl border px-4 py-3 w-full transition-all duration-200 ease-in-out
-                ${
-                  isLoading
-                    ? "border-muted text-muted-foreground cursor-not-allowed"
-                    : "border-border text-foreground hover:border-primary hover:bg-primary/5 hover:scale-[1.02] active:scale-[0.98]"
-                }
-              `}
+            {/* Google */}
+            <Button
+              variant="outline"
+              className="h-10 w-full text-sm flex items-center justify-center gap-2"
               onClick={signInWithGoogle}
               disabled={isLoading}
             >
-              {isLoading ? "Google sign in..." : "Google"}
-            </button>
-          </div>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 48 48"
+                className="h-4 w-4"
+              >
+                <path
+                  fill="#FFC107"
+                  d="M43.6 20.5H42V20H24v8h11.3A12 12 0 1124 12a11.9 11.9 0 018.4 3.3l5.7-5.7A20 20 0 1024 44c10.5 0 19-8.5 19-19 0-1.6-.2-2.8-.4-4.5z"
+                />
+                <path
+                  fill="#FF3D00"
+                  d="M6.3 14.7l6.6 4.8A12 12 0 0124 12c3.3 0 6.3 1.3 8.4 3.3l5.7-5.7A20 20 0 006.3 14.7z"
+                />
+                <path
+                  fill="#4CAF50"
+                  d="M24 44c5.4 0 10.3-2.1 13.9-5.6l-6.4-5.2A12 12 0 0112.8 29l-6.5 5C9.6 39.6 16.3 44 24 44z"
+                />
+                <path
+                  fill="#1976D2"
+                  d="M43.6 20.5H42V20H24v8h11.3c-1 3-3.1 5.4-5.8 6.8l6.4 5.2C39.9 37.9 44 31.6 44 25c0-1.6-.2-3.1-.4-4.5z"
+                />
+              </svg>
+              Continue with Google
+            </Button>
 
-          {/* Message Display */}
-          {message && (
-            <div
-              className={`text-center text-sm p-3 rounded-lg animate-in fade-in slide-in-from-bottom-2 duration-300 ${
-                message.includes("failed") || message.includes("error")
-                  ? "bg-destructive/10 text-destructive border border-destructive/20"
-                  : "bg-primary/10 text-primary border border-primary/20"
-              }`}
-            >
-              {message}
-            </div>
-          )}
-        </div>
-      )}
+            {/* Message */}
+            {message && (
+              <div
+                className={`mt-2 text-center text-sm p-3 rounded-lg animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+                  message.includes("failed") || message.includes("error")
+                    ? "bg-destructive/10 text-destructive border border-destructive/20"
+                    : "bg-primary/10 text-primary border border-primary/20"
+                }`}
+              >
+                {message}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
