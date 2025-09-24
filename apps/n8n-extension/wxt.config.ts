@@ -11,7 +11,6 @@ export default defineConfig({
       "tabs",
       "scripting",
       "activeTab",
-      "cookies",
       // Dynamic permissions for n8n instances will be requested at runtime
     ],
     optional_host_permissions: ["https://*/*", "http://*/*"],
