@@ -15,6 +15,12 @@ export default function AuthPanel() {
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [awaitingOtp, setAwaitingOtp] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  const [awaitingPasswordReset, setAwaitingPasswordReset] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [newPasswordError, setNewPasswordError] = useState("");
   const { data: session, isPending } = authClient.useSession();
 
   // Animate form entrance
@@ -49,6 +55,99 @@ export default function AuthPanel() {
     }
     setPasswordError("");
     return true;
+  };
+
+  const validateNewPassword = (password: string) => {
+    if (!password) {
+      setNewPasswordError("Password is required");
+      return false;
+    }
+    if (password.length < 6) {
+      setNewPasswordError("Password must be at least 6 characters");
+      return false;
+    }
+    if (confirmPassword && password !== confirmPassword) {
+      setNewPasswordError("Passwords do not match");
+      return false;
+    }
+    setNewPasswordError("");
+    return true;
+  };
+
+  const sendPasswordResetOtp = async () => {
+    const emailToUse = forgotPasswordEmail || email;
+    if (!validateEmail(emailToUse)) {
+      setMessage("Please enter a valid email address");
+      return;
+    }
+
+    setIsLoading(true);
+    setMessage("");
+
+    try {
+      // Use the official better-auth method for sending forget-password OTP
+      const { error } = await authClient.forgetPassword.emailOtp({
+        email: emailToUse,
+      });
+
+      if (error) {
+        setMessage(`Failed to send reset code: ${error.message}`);
+      } else {
+        setAwaitingPasswordReset(true);
+        setMessage(
+          "We sent a password reset code to your email. Enter it below."
+        );
+      }
+    } catch (err) {
+      setMessage("An unexpected error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetPassword = async () => {
+    const emailToUse = forgotPasswordEmail || email;
+    if (!validateEmail(emailToUse)) return;
+    if (!otp || otp.length < 4) {
+      setMessage("Enter the verification code we emailed you");
+      return;
+    }
+    if (!validateNewPassword(newPassword)) return;
+    if (newPassword !== confirmPassword) {
+      setNewPasswordError("Passwords do not match");
+      return;
+    }
+
+    setIsLoading(true);
+    setMessage("");
+
+    try {
+      // Use the official better-auth resetPassword method with OTP
+      const { error } = await authClient.emailOtp.resetPassword({
+        email: emailToUse,
+        otp,
+        password: newPassword,
+      });
+
+      if (error) {
+        setMessage(`Password reset failed: ${error.message}`);
+      } else {
+        setMessage(
+          "Password reset successfully! You can now sign in with your new password."
+        );
+        // Reset the form
+        setShowForgotPassword(false);
+        setAwaitingPasswordReset(false);
+        setOtp("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setForgotPasswordEmail("");
+      }
+    } catch (err) {
+      setMessage("Verification failed");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const signUp = async () => {
@@ -215,7 +314,9 @@ export default function AuthPanel() {
           <h1 className="font-bold text-2xl bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
             Welcome to n8nGPT
           </h1>
-          <p className="text-muted-foreground text-sm">Sign in to continue</p>
+          {!showForgotPassword && (
+            <p className="text-muted-foreground text-sm">Sign in to continue</p>
+          )}
         </div>
 
         {/* Loading indicator */}
@@ -233,59 +334,84 @@ export default function AuthPanel() {
             }`}
           >
             {/* Email */}
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-sm text-foreground/90">
-                Email
-              </label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={handleEmailChange}
-                disabled={isLoading}
-                aria-invalid={!!emailError}
-              />
-              {emailError && (
-                <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                  {emailError}
-                </p>
-              )}
-            </div>
+            {!showForgotPassword && (
+              <div className="space-y-2">
+                <label htmlFor="email" className="text-sm text-foreground/90">
+                  Email
+                </label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={handleEmailChange}
+                  disabled={isLoading}
+                  aria-invalid={!!emailError}
+                />
+                {emailError && (
+                  <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                    {emailError}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Password */}
-            <div className="space-y-2">
-              <label htmlFor="password" className="text-sm text-foreground/90">
-                Password
-              </label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={handlePasswordChange}
-                  disabled={isLoading}
-                  aria-invalid={!!passwordError}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") signIn();
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute inset-y-0 right-2 my-auto h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+            {!showForgotPassword && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="password"
+                  className="text-sm text-foreground/90"
                 >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
+                  Password
+                </label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={handlePasswordChange}
+                    disabled={isLoading}
+                    aria-invalid={!!passwordError}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") signIn();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-2 my-auto h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+                {passwordError && (
+                  <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                    {passwordError}
+                  </p>
+                )}
+
+                {/* Forgot Password Link */}
+                {!showForgotPassword &&
+                  !awaitingOtp &&
+                  !awaitingPasswordReset && (
+                    <div className="text-right">
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotPassword(true)}
+                        className="text-xs text-primary hover:underline"
+                        disabled={isLoading}
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
               </div>
-              {passwordError && (
-                <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                  {passwordError}
-                </p>
-              )}
-            </div>
+            )}
 
             {/* OTP verification block (shown after sign-up) */}
             {awaitingOtp && (
@@ -327,9 +453,183 @@ export default function AuthPanel() {
               </div>
             )}
 
+            {/* Forgot Password Form */}
+            {showForgotPassword && !awaitingPasswordReset && (
+              <div className="space-y-4 border-t border-border/50 pt-4">
+                <div className="text-center">
+                  <h3 className="font-medium text-sm">Reset your password</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Enter your email to receive a reset code
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label
+                    htmlFor="forgot-email"
+                    className="text-sm text-foreground/90"
+                  >
+                    Email
+                  </label>
+                  <Input
+                    id="forgot-email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={forgotPasswordEmail}
+                    onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                    disabled={isLoading}
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-9 text-xs flex-1"
+                    onClick={() => {
+                      setShowForgotPassword(false);
+                      setForgotPasswordEmail("");
+                      setMessage("");
+                    }}
+                    disabled={isLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    className="h-9 text-xs flex-1"
+                    onClick={sendPasswordResetOtp}
+                    disabled={isLoading || !forgotPasswordEmail}
+                  >
+                    {isLoading ? "Sending..." : "Send Code"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Password Reset with OTP */}
+            {awaitingPasswordReset && (
+              <div className="space-y-4 border-t border-border/50 pt-4">
+                <div className="text-center">
+                  <h3 className="font-medium text-sm">
+                    Enter reset code & new password
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Check your email for the verification code
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label
+                    htmlFor="reset-otp"
+                    className="text-sm text-foreground/90"
+                  >
+                    Verification code
+                  </label>
+                  <Input
+                    id="reset-otp"
+                    inputMode="numeric"
+                    placeholder="Enter the 6-digit code"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                    disabled={isLoading}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label
+                    htmlFor="new-password"
+                    className="text-sm text-foreground/90"
+                  >
+                    New password
+                  </label>
+                  <Input
+                    id="new-password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={newPassword}
+                    onChange={(e) => {
+                      setNewPassword(e.target.value);
+                      if (newPasswordError) validateNewPassword(e.target.value);
+                    }}
+                    disabled={isLoading}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label
+                    htmlFor="confirm-password"
+                    className="text-sm text-foreground/90"
+                  >
+                    Confirm new password
+                  </label>
+                  <Input
+                    id="confirm-password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={(e) => {
+                      setConfirmPassword(e.target.value);
+                      if (newPasswordError && newPassword)
+                        validateNewPassword(newPassword);
+                    }}
+                    disabled={isLoading}
+                  />
+                  {newPasswordError && (
+                    <p className="text-destructive text-xs px-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                      {newPasswordError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="h-9 text-xs"
+                    disabled={isLoading}
+                    onClick={async () => {
+                      try {
+                        await authClient.forgetPassword.emailOtp({
+                          email: forgotPasswordEmail || email,
+                        });
+                        setMessage("Code resent");
+                      } catch {
+                        setMessage("Could not resend code");
+                      }
+                    }}
+                  >
+                    Resend code
+                  </Button>
+                  <Button
+                    className="h-9 text-xs flex-1"
+                    onClick={resetPassword}
+                    disabled={
+                      isLoading || !otp || !newPassword || !confirmPassword
+                    }
+                  >
+                    {isLoading ? "Resetting..." : "Reset Password"}
+                  </Button>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  className="h-8 text-xs w-full"
+                  onClick={() => {
+                    setAwaitingPasswordReset(false);
+                    setShowForgotPassword(false);
+                    setOtp("");
+                    setNewPassword("");
+                    setConfirmPassword("");
+                    setForgotPasswordEmail("");
+                    setMessage("");
+                  }}
+                  disabled={isLoading}
+                >
+                  Back to sign in
+                </Button>
+              </div>
+            )}
+
             {/* Primary actions */}
-            <div className="pt-1 grid grid-cols-1 gap-2">
-              {!awaitingOtp ? (
+            {!showForgotPassword && <div className="pt-1 grid grid-cols-1 gap-2">
+              {!awaitingOtp && !showForgotPassword && !awaitingPasswordReset ? (
                 <>
                   <Button
                     className="h-10 text-sm"
@@ -363,7 +663,7 @@ export default function AuthPanel() {
                   Verify email
                 </Button>
               )}
-            </div>
+            </div>}
 
             {/* Divider */}
             <div className="relative text-center py-1">

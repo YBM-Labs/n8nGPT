@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./db.js";
 import { emailOTP } from "better-auth/plugins/email-otp";
+import { sendEmail } from "./resend.js";
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
@@ -33,19 +34,15 @@ export const auth = betterAuth({
     emailOTP({
       // Send a 6-digit OTP to the user's email. We'll plug a provider later.
       async sendVerificationOTP({ email, otp, type }) {
-        // TODO: integrate email provider (e.g., Resend, SendGrid, SES)
-        // Example:
-        // await sendEmail({ to: email, subject: `Your ${type} code`, text: `Code: ${otp}` })
+        await sendEmail(email, otp, type);
         console.log("[email-otp] sendVerificationOTP", { email, otp, type });
       },
       otpLength: 6,
       expiresIn: 60 * 5, // 5 minutes
-      // We rely on Better Auth's default verification trigger (requireEmailVerification)
-      // which is overridden to OTP by this plugin. Avoid double sends here.
+     
       sendVerificationOnSignUp: false,
       overrideDefaultEmailVerification: true,
       allowedAttempts: 3,
-      // storeOTP: "hashed", // optionally enable when you add hashing helpers
     }),
   ],
 });
